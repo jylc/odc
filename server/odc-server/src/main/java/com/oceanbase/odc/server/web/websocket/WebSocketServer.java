@@ -117,6 +117,7 @@ public class WebSocketServer {
      * obclient可执行文件路径
      */
     private final String obclientFilePath;
+    private final String psqlFilePath;
     /**
      * 脚本存储空间
      */
@@ -130,9 +131,11 @@ public class WebSocketServer {
 
     @Autowired
     public WebSocketServer(@Value("${obclient.file.path:/opt/odc/obclient/bin/obclient}") String obclientFilePath,
+            @Value("${psql.file.path:/opt/odc/psql/bin/psql}")String psqlFilePath,
             @Value("${odc.objectstorage.local.dir:#{systemProperties['user.home'].concat(T(java.io.File).separator).concat('data').concat"
                     + "(T(java.io.File).separator).concat('files')}}") String baseObjectStorageDir) {
         this.obclientFilePath = obclientFilePath;
+        this.psqlFilePath = psqlFilePath;
         this.baseScriptFilePath =
                 baseObjectStorageDir.concat(File.separator).concat(ScriptConstants.SCRIPT_BASE_BUCKET);
         ThreadFactory threadFactory = new ThreadFactoryBuilder()
@@ -265,6 +268,13 @@ public class WebSocketServer {
 
     private List<String> getRunObClientCmd(ConnectionConfig connectionConfig, boolean supportSetGBK, String schema) {
         List<String> obclientCmd = new ArrayList<>();
+        if(DialectType.POSTGRESQL.equals(connectionConfig.getDialectType())){
+            obclientCmd.add(psqlFilePath);
+            obclientCmd.add(String.format("postgresql://%s:%s@%s:%s/%s",
+                getDbUser(connectionConfig),
+                connectionConfig.getPassword(),connectionConfig.getHost(),connectionConfig.getPort(),connectionConfig.getCatalogName()));
+            return obclientCmd;
+        }
         obclientCmd.add(obclientFilePath);
         obclientCmd.add(String.format("-h%s", connectionConfig.getHost()));
         obclientCmd.add(String.format("-P%d", connectionConfig.getPort()));
