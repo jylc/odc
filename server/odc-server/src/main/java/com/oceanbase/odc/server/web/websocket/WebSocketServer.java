@@ -270,6 +270,8 @@ public class WebSocketServer {
         List<String> obclientCmd = new ArrayList<>();
         if(DialectType.POSTGRESQL.equals(connectionConfig.getDialectType())){
             obclientCmd.add(psqlFilePath);
+            obclientCmd.add("-P");
+            obclientCmd.add("pager=off");
             obclientCmd.add(String.format("postgresql://%s:%s@%s:%s/%s",
                 getDbUser(connectionConfig),
                 connectionConfig.getPassword(),connectionConfig.getHost(),connectionConfig.getPort(),connectionConfig.getCatalogName()));
