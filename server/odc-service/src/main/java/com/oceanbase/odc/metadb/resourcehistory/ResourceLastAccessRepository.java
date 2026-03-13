@@ -26,7 +26,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
-import org.springframework.stereotype.Repository;
 
 import com.oceanbase.odc.common.jdbc.JdbcTemplateUtils;
 import com.oceanbase.odc.config.jpa.OdcJpaRepository;
@@ -34,7 +33,6 @@ import com.oceanbase.odc.core.shared.PreConditions;
 
 import lombok.NonNull;
 
-@Repository
 public interface ResourceLastAccessRepository extends OdcJpaRepository<ResourceLastAccessEntity, Long>,
         JpaRepository<ResourceLastAccessEntity, Long>, JpaSpecificationExecutor<ResourceLastAccessEntity> {
     Optional<ResourceLastAccessEntity> findByOrganizationIdAndProjectIdAndUserIdAndResourceTypeAndResourceId(

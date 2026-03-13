@@ -44,6 +44,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.orm.jpa.JpaTransactionManager;
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
 import org.springframework.scheduling.concurrent.ConcurrentTaskExecutor;
+import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
@@ -63,7 +64,8 @@ import com.oceanbase.odc.core.task.TaskThreadFactory;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @Configuration
 @MapperScan(basePackages = {"com.oceanbase.odc.metadb"},
-        sqlSessionFactoryRef = "metadbSqlSessionFactory")
+        sqlSessionFactoryRef = "metadbSqlSessionFactory",
+        annotationClass = Component.class)
 @EnableJpaRepositories(basePackages = {"com.oceanbase.odc.metadb"}, repositoryBaseClass = EnhancedJpaRepository.class,
         entityManagerFactoryRef = "metadbEntityManagerFactory", transactionManagerRef = "metadbTransactionManager")
 @EntityScan({"com.oceanbase.odc.metadb"})

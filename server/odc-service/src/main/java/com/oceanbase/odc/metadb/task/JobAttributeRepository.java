@@ -19,14 +19,12 @@ import java.util.List;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
-import org.springframework.stereotype.Repository;
 
 /**
  * @author yaobin
  * @date 2023-12-06
  * @since 4.2.4
  */
-@Repository
 public interface JobAttributeRepository extends JpaRepository<JobAttributeEntity, Long>,
         JpaSpecificationExecutor<JobAttributeEntity> {
 

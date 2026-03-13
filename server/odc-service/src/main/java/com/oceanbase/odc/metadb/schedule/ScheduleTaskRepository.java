@@ -31,7 +31,6 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
 
 import com.oceanbase.odc.config.jpa.OdcJpaRepository;
 import com.oceanbase.odc.core.shared.constant.TaskStatus;
@@ -42,7 +41,6 @@ import com.oceanbase.odc.service.schedule.model.QueryScheduleTaskParams;
  * @Date: 2023/5/16 11:38
  * @Descripition:
  */
-@Repository
 public interface ScheduleTaskRepository extends JpaRepository<ScheduleTaskEntity, Long>,
         JpaSpecificationExecutor<ScheduleTaskEntity> {
 

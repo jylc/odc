@@ -24,14 +24,12 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.stereotype.Repository;
 
 /**
  * @author yaobin
  * @date 2023-12-06
  * @since 4.2.4
  */
-@Repository
 public interface ResourceAllocateInfoRepository extends JpaRepository<ResourceAllocateInfoEntity, Long>,
         JpaSpecificationExecutor<ResourceAllocateInfoEntity> {
 
