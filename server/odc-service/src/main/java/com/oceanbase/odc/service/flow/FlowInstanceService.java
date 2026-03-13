@@ -701,7 +701,7 @@ public class FlowInstanceService {
                                     .and(FlowInstanceViewSpecs.taskTypeEquals(TaskType.APPLY_PROJECT_PERMISSION))));
         }
         if (params.getContainsAll()) {
-            return flowInstanceViewRepository.findAll(specification, pageable).map(FlowInstanceEntity::from);
+            return flowInstanceViewRepository.findAllWithoutFlowConfigSnapshot(specification, pageable);
         }
         if (params.getCreatedByCurrentUser()) {
             // created by current user
@@ -717,7 +717,7 @@ public class FlowInstanceService {
             specification = specification.and(FlowInstanceViewSpecs.leftJoinFlowInstanceApprovalView(
                     resourceRoleIdentifiers, null, FlowNodeStatus.getExecutingStatuses()));
         }
-        return flowInstanceViewRepository.findAll(specification, pageable).map(FlowInstanceEntity::from);
+        return flowInstanceViewRepository.findAllWithoutFlowConfigSnapshot(specification, pageable);
     }
 
     public List<FlowInstanceEntity> listByIds(@NonNull Collection<Long> ids) {

@@ -29,6 +29,9 @@ import com.oceanbase.odc.ServiceTestEnv;
 import com.oceanbase.odc.core.shared.constant.TaskType;
 import com.oceanbase.odc.service.flow.model.FlowNodeStatus;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
 /**
  * @author jingtian
  * @date 2023/8/13
@@ -37,6 +40,15 @@ import com.oceanbase.odc.service.flow.model.FlowNodeStatus;
 public class FlowInstanceViewRepositoryTest extends ServiceTestEnv {
     @Autowired
     private FlowInstanceViewRepository flowInstanceViewRepository;
+
+    @Test
+    public void test_findAllWithoutFlowConfigSnapshot() {
+        Specification<FlowInstanceViewEntity> specification = Specification
+                .where(FlowInstanceViewSpecs.organizationIdEquals(1L));
+        Page<FlowInstanceEntity> page =
+                flowInstanceViewRepository.findAllWithoutFlowConfigSnapshot(specification, Pageable.unpaged());
+        Assert.assertNotNull(page);
+    }
 
     @Test
     public void test_leftJoinFlowInstanceApprovalView_with_creator_id() {

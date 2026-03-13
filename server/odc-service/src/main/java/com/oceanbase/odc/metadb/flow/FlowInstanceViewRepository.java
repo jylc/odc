@@ -16,10 +16,16 @@
 
 package com.oceanbase.odc.metadb.flow;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
+
 /**
  * @author jingtian
  * @date 2023/8/10
  * @since ODC_release_4.2.0
  */
 public interface FlowInstanceViewRepository extends ReadOnlyRepository<FlowInstanceViewEntity, Long> {
+    Page<FlowInstanceEntity> findAllWithoutFlowConfigSnapshot(Specification<FlowInstanceViewEntity> specification,
+            Pageable pageable);
 }
