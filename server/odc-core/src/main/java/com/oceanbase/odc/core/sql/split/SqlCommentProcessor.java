@@ -61,6 +61,10 @@ public class SqlCommentProcessor {
     private char inString = '\0';
     private DialectType dialectType;
     private char escapeString = '\0';
+    /**
+     * PostgreSQL 美元符号引用标记，null 表示不在美元符号引用中。 空字符串表示 $$，非空表示 $tag$ 中的 tag 部分。
+     */
+    private String dollarQuoteTag = null;
     private boolean inNormalSql = false;
     /**
      * 是否保留单行注释
@@ -167,6 +171,8 @@ public class SqlCommentProcessor {
                     addLineOracle(offsetStrings, buffer, bufferOrder, item);
                 } else if (Objects.nonNull(this.dialectType) && this.dialectType.isDoris()) {
                     addLineMysql(offsetStrings, buffer, bufferOrder, item);
+                } else if (Objects.nonNull(this.dialectType) && this.dialectType.isPostgreSql()) {
+                    addLinePostgres(offsetStrings, buffer, bufferOrder, item);
                 } else {
                     throw new IllegalArgumentException("dialect type is illegal");
                 }
@@ -176,6 +182,7 @@ public class SqlCommentProcessor {
             mlComment = false;
             inString = '\0';
             inNormalSql = false;
+            dollarQuoteTag = null;
         }
     }
 
@@ -602,6 +609,237 @@ public class SqlCommentProcessor {
         }
     }
 
+    /**
+     * PostgreSQL 模式下的 SQL 行解析，处理以下 PG 特有语法：
+     * <ul>
+     * <li>美元符号引用：$$...$$ 或 $tag$...$tag$</li>
+     * <li>单行注释：仅支持 --（不支持 MySQL 的 #）</li>
+     * <li>多行注释：/* *&#47;（不支持 MySQL 的 conditional comment /&#42;! )</li>
+     * <li>字符串引用：单引号和双引号（不使用反引号）</li>
+     * <li>不支持 \ 转义（PG 标准字符串中使用 '' 转义单引号）</li>
+     * </ul>
+     */
+    private synchronized void addLinePostgres(List<OffsetString> sqls, StringBuffer buffer,
+            Holder<Integer> bufferOrder, List<OrderChar> line) {
+        int pos, out;
+        boolean needSpace = false;
+        SSC ssComment = SSC.NONE;
+        boolean isSameLine = false;
+        int lineLength = line.size();
+        OrderChar[] lines = line.toArray(new OrderChar[lineLength + 1]);
+        if ((lines.length == 0 || lines[0] == null || lines[0].getCh() == 0) && buffer.length() == 0) {
+            return;
+        }
+        lines[lineLength] = new OrderChar((char) 0, lineLength);
+        for (pos = out = 0; pos < lineLength; pos++) {
+            OrderChar inOrderChar = lines[pos];
+            char inChar = inOrderChar.getCh();
+            // 去掉每一行SQL语句最开始的空格
+            if (inChar == ' ' && out == 0 && buffer.length() == 0 && !preserveFormat) {
+                continue;
+            }
+            // 处于美元符号引用中，只查找结束标记
+            if (dollarQuoteTag != null) {
+                String endTag = dollarQuoteTag.isEmpty() ? "$$" : "$" + dollarQuoteTag + "$";
+                if (inChar == '$' && pos + endTag.length() <= lineLength) {
+                    boolean match = true;
+                    for (int i = 0; i < endTag.length(); i++) {
+                        if (lines[pos + i].getCh() != endTag.charAt(i)) {
+                            match = false;
+                            break;
+                        }
+                    }
+                    if (match) {
+                        for (int i = 0; i < endTag.length(); i++) {
+                            lines[out++] = OrderChar.newOrderChar(lines[pos + i]);
+                        }
+                        pos += endTag.length() - 1;
+                        dollarQuoteTag = null;
+                        continue;
+                    }
+                }
+                lines[out++] = OrderChar.newOrderChar(inOrderChar);
+                if (inChar != ' ') {
+                    inNormalSql = true;
+                }
+                continue;
+            }
+            // 检测美元符号引用开始：$$ 或 $tag$
+            if (!mlComment && inString == '\0' && ssComment == SSC.NONE && inChar == '$') {
+                StringBuilder tag = new StringBuilder();
+                int lookahead = pos + 1;
+                boolean foundEndDollar = false;
+                while (lookahead < lineLength) {
+                    char nextChar = lines[lookahead].getCh();
+                    if (nextChar == '$') {
+                        foundEndDollar = true;
+                        break;
+                    } else if ((tag.length() == 0 && (Character.isLetter(nextChar) || nextChar == '_'))
+                            || (tag.length() > 0
+                                    && (Character.isLetterOrDigit(nextChar) || nextChar == '_'))) {
+                        tag.append(nextChar);
+                        lookahead++;
+                    } else {
+                        break;
+                    }
+                }
+                if (foundEndDollar) {
+                    dollarQuoteTag = tag.toString();
+                    for (int i = pos; i <= lookahead; i++) {
+                        lines[out++] = OrderChar.newOrderChar(lines[i]);
+                    }
+                    pos = lookahead;
+                    continue;
+                }
+                // 不是有效的美元符号引用开始标记，正常处理 $ 字符
+            }
+            int delimiterBegin = 0;
+            if (preserveFormat) {
+                for (; delimiterBegin < out
+                        && (lines[delimiterBegin].getCh() == ' '
+                                || lines[delimiterBegin].getCh() == '\t'); delimiterBegin++) {
+                }
+            }
+            if (!mlComment && inString == '\0' && ssComment != SSC.HINT
+                    && isPrefix(lines, pos, delimiter)) {
+                // 不是多行注释，未在字符串中，不是hint且以delimiter开头，通常是扫描到了sql的末尾
+                pos += delimiter.length();
+                if (out != 0) {
+                    if (buffer.length() == 0) {
+                        bufferOrder.setValue(lines[0].getOrder());
+                    }
+                    append(buffer, lines, 0, out);
+                    out = 0;
+                }
+                sqls.add(new OffsetString(bufferOrder.getValue(), buffer.toString()));
+                bufferOrder.setValue(bufferOrder.getValue() + buffer.length());
+                pos--;
+                buffer.setLength(0);
+                isSameLine = true;
+                inNormalSql = false;
+            } else if (!mlComment
+                    && (inString == '\0' && (inChar == '-' && lines[pos + 1].getCh() == '-'
+                            && ((lines[pos + 2].getCh() == ' ' || lines[pos + 2].getCh() == '\0'))))) {
+                // PostgreSQL 单行注释 --（不支持 #）
+                if (buffer.length() == 0) {
+                    bufferOrder.setValue(lines[0].getOrder());
+                }
+                append(buffer, lines, 0, out);
+                out = 0;
+                if (preserveSingleComments) {
+                    for (; pos < lineLength; pos++) {
+                        lines[out++] = OrderChar.newOrderChar(lines[pos]);
+                    }
+                    if (isOnlyWhiteSpace(buffer)) {
+                        if (sqls.size() != 0) {
+                            if (buffer.length() == 0) {
+                                bufferOrder.setValue(lines[0].getOrder());
+                            }
+                            append(buffer, lines, 0, out);
+                            int lastIndex = sqls.size() - 1;
+                            String lastSql = sqls.get(lastIndex).getStr();
+                            if (!isSameLine) {
+                                lastSql += '\n';
+                            }
+                            lastSql += buffer + "\n";
+                            sqls.set(lastIndex, new OffsetString(sqls.get(lastIndex).getOffset(), lastSql));
+                            buffer.setLength(0);
+                        } else {
+                            lines[out++].setCh('\n');
+                            if (buffer.length() == 0) {
+                                bufferOrder.setValue(lines[0].getOrder());
+                            }
+                            append(buffer, lines, 0, out - 1);
+                        }
+                    } else {
+                        lines[out++].setCh('\n');
+                        if (buffer.length() == 0) {
+                            bufferOrder.setValue(lines[0].getOrder());
+                        }
+                        append(buffer, lines, 0, out - 1);
+                    }
+                    out = 0;
+                }
+                break;
+            } else if (inString == '\0' && (inChar == '/' && lines[pos + 1].getCh() == '*')
+                    && lines[pos + 2].getCh() != '+'
+                    && ssComment != SSC.HINT) {
+                // 处于多行注释中，PostgreSQL 没有 conditional comment (/*!)
+                if (preserveMultiComments) {
+                    lines[out++].setCh('/');
+                    lines[out++].setCh('*');
+                }
+                pos++;
+                mlComment = true;
+            } else if (mlComment && ssComment == SSC.NONE && inChar == '*' && lines[pos + 1].getCh() == '/') {
+                // 多行注释结束
+                pos++;
+                mlComment = false;
+                if (buffer.length() == 0) {
+                    bufferOrder.setValue(lines[0].getOrder());
+                }
+                append(buffer, lines, 0, out);
+                out = 0;
+                if (preserveMultiComments) {
+                    lines[out++].setCh('*');
+                    lines[out++].setCh('/');
+                    if (buffer.length() == 0) {
+                        bufferOrder.setValue(lines[0].getOrder());
+                    }
+                    append(buffer, lines, 0, out);
+                    out = 0;
+                    if (sqls.size() != 0 && !inNormalSql) {
+                        int lastIndex = sqls.size() - 1;
+                        String lastSql = sqls.get(lastIndex).getStr() + buffer;
+                        sqls.set(lastIndex, new OffsetString(sqls.get(lastIndex).getOffset(), lastSql));
+                        buffer.setLength(0);
+                    }
+                }
+                needSpace = true;
+            } else {
+                if (inString == '\0' && inChar == '/' && lines[pos + 1].getCh() == '*') {
+                    if (lines[pos + 2].getCh() == '+') {
+                        // 处于HINT中
+                        ssComment = SSC.HINT;
+                    }
+                    // PostgreSQL 没有 conditional comment
+                } else if (inString == '\0' && ssComment != SSC.NONE && inChar == '*'
+                        && lines[pos + 1].getCh() == '/') {
+                    // HINT结束
+                    ssComment = SSC.NONE;
+                }
+                if (inChar == inString) {
+                    // 字符指针出字符串或表达式
+                    inString = '\0';
+                } else if (!mlComment && inString == '\0' && ssComment != SSC.HINT
+                        && (inChar == '\'' || inChar == '"')) {
+                    // PostgreSQL 使用单引号和双引号，不使用反引号
+                    inString = inChar;
+                }
+                if (!mlComment) {
+                    if (needSpace && inChar == ' ') {
+                        lines[out++].setCh(' ');
+                    }
+                    needSpace = false;
+                    lines[out++] = OrderChar.newOrderChar(inOrderChar);
+                    if (inChar != ' ') {
+                        inNormalSql = true;
+                    }
+                } else if (preserveMultiComments) {
+                    lines[out++] = OrderChar.newOrderChar(inOrderChar);
+                }
+            }
+        }
+        // 拦截性的处理，如果out指针没有为0，说明lines中还有内容没有被刷入到buffer，在这里进行flush
+        if (out != 0 || buffer.length() != 0) {
+            lines[out++].setCh('\n');
+            if (buffer.length() == 0) {
+                bufferOrder.setValue(lines[0].getOrder());
+            }
+            append(buffer, lines, 0, out);
+        }
+    }
+
     private boolean equalsIgnoreCase(char[] src, OrderChar[] dest, int begin, int count) {
         if (src == null && dest == null) {
             return true;
@@ -795,6 +1033,10 @@ public class SqlCommentProcessor {
                                 .collect(Collectors.toList()));
                     } else if (processor.dialectType.isDoris()) {
                         processor.addLineMysql(holder, buffer, bufferOrder, line.chars()
+                                .mapToObj(c -> new OrderChar((char) c, lastLineOrder++))
+                                .collect(Collectors.toList()));
+                    } else if (processor.dialectType.isPostgreSql()) {
+                        processor.addLinePostgres(holder, buffer, bufferOrder, line.chars()
                                 .mapToObj(c -> new OrderChar((char) c, lastLineOrder++))
                                 .collect(Collectors.toList()));
                     }
