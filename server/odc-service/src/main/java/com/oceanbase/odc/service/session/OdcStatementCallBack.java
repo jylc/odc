@@ -112,6 +112,10 @@ public class OdcStatementCallBack implements StatementCallback<List<JdbcGeneralR
     private static final Pattern OBJECT_VALUE_PATTERN =
             Pattern.compile("(?<!')(load_[a-zA-Z_]*file)\\s*\\(\\s*'([a-zA-Z0-9_.\\-]+)'\\s*\\)\\s*(?!')",
                     Pattern.CASE_INSENSITIVE);
+    /**
+     * Pattern to detect LIMIT clause in SQL (case-insensitive)
+     */
+    private static final Pattern LIMIT_PATTERN = Pattern.compile("\\blimit\\s+\\d+", Pattern.CASE_INSENSITIVE);
     private final ConnectType connectType;
     private final DialectType dialectType;
     private final JdbcRowMapper rowDataMapper;
@@ -337,9 +341,62 @@ public class OdcStatementCallBack implements StatementCallback<List<JdbcGeneralR
         return executeResults;
     }
 
+    /**
+     * Apply queryLimit for ODP Sharding mode by appending LIMIT clause to SELECT statements. This
+     * avoids full table scans on each shard.
+     *
+     * @param sql original SQL statement
+     * @return SQL with LIMIT clause if conditions are met, otherwise original SQL
+     */
+    private String applyQueryLimitForOdpSharding(String sql) {
+        // Check if ODP Sharding mode and queryLimit is set
+        if (!connectType.isODPSharding() || queryLimit == null) {
+            return sql;
+        }
+
+        // Trim SQL for checking
+        String trimmedSql = sql.trim();
+
+        // Check if it's a SELECT statement (case-insensitive, must start with SELECT)
+        // Skip if SQL already contains LIMIT clause
+        if (!trimmedSql.toUpperCase().startsWith("SELECT") || hasLimitClause(trimmedSql)) {
+            return sql;
+        }
+
+        // Append LIMIT clause
+        return sql + " LIMIT " + queryLimit;
+    }
+
+    /**
+     * Check if SQL already contains a LIMIT clause.
+     *
+     * @param sql SQL statement to check
+     * @return true if SQL contains LIMIT clause, false otherwise
+     */
+    private boolean hasLimitClause(String sql) {
+        // Remove comments first to avoid false positives
+        String sqlWithoutComments = removeSqlComments(sql);
+        return LIMIT_PATTERN.matcher(sqlWithoutComments).find();
+    }
+
+    /**
+     * Remove single-line and multi-line comments from SQL.
+     *
+     * @param sql SQL statement
+     * @return SQL without comments
+     */
+    private String removeSqlComments(String sql) {
+        // Remove single-line comments (-- ...)
+        String result = sql.replaceAll("--.*?\\n", " ");
+        // Remove multi-line comments (/* ... */)
+        result = result.replaceAll("/\\*.*?\\*/", " ");
+        return result;
+    }
+
     protected List<JdbcGeneralResult> doExecuteSql(Statement statement, SqlTuple sqlTuple, CountDownLatch latch) {
         try {
             String sql = sqlTuple.getExecutedSql();
+            sql = applyQueryLimitForOdpSharding(sql);
             if (!ifFunctionCallExists(sql)) {
                 // use text protocal
                 try (TraceStage stage = sqlTuple.getSqlWatch().start(SqlExecuteStages.EXECUTE)) {
