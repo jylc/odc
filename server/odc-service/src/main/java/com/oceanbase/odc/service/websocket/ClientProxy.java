@@ -16,6 +16,11 @@
 package com.oceanbase.odc.service.websocket;
 
 /**
+ * Abstraction over the web-terminal backend. Historically the only implementation spawned a local
+ * obclient/psql subprocess ({@link OBClientProxy}). A JDBC-driver-backed implementation
+ * ({@code JdbcClientProxy}) executes SQL through {@code ConnectionSession} instead of a subprocess,
+ * so the web terminal no longer depends on a locally-installed client binary for that dialect.
+ *
  * @author wenniu.ly
  * @date 2020/12/14
  */
@@ -32,4 +37,25 @@ public interface ClientProxy {
     }
 
     void close();
+
+    /**
+     * Whether the backend is still alive. For a subprocess backend this is whether the process is
+     * running; for a JDBC backend this is whether the session is usable. Used by the scheduled reaper
+     * in {@code WebSocketServer} to detect dead terminals.
+     *
+     * @return {@code true} if the backend can still serve requests
+     */
+    default boolean isAlive() {
+        return true;
+    }
+
+    /**
+     * Last time the terminal was accessed (a {@code stdin}/{@code ping} message arrived). Used by the
+     * scheduled reaper to close idle terminals after the ping timeout.
+     *
+     * @return epoch millis of last access
+     */
+    long getLastAccessTime();
+
+    void setLastAccessTime(long accessTime);
 }

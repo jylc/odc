@@ -32,6 +32,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import javax.annotation.Nullable;
 import javax.annotation.PreDestroy;
@@ -72,6 +73,7 @@ import com.oceanbase.odc.service.script.model.ScriptConstants;
 import com.oceanbase.odc.service.session.ConnectSessionService;
 import com.oceanbase.odc.service.websocket.ClientProxy;
 import com.oceanbase.odc.service.websocket.ConnectionConfigProvider;
+import com.oceanbase.odc.service.websocket.JdbcClientProxy;
 import com.oceanbase.odc.service.websocket.OBClientProxy;
 import com.oceanbase.odc.service.websocket.WebSocketBody;
 import com.oceanbase.odc.service.websocket.WebSocketCustomEncoding;
@@ -97,7 +99,7 @@ public class WebSocketServer {
     private static final int DEFAULT_PING_TIMEOUT_MILLIS = 5 * 60 * 1000;// 5min
     // record number of websocket connections
     private static final AtomicInteger onlineNum = new AtomicInteger();
-    private static final ConcurrentHashMap<Session, OBClientProxy> connectionPool = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<Session, ClientProxy> connectionPool = new ConcurrentHashMap<>();
 
     @Autowired
     private ConnectionService connectionService;
@@ -113,6 +115,13 @@ public class WebSocketServer {
 
     @Value("${odc.server.obclient.command-black-list:}")
     private List<String> obclientCommandBlackList;
+    /**
+     * Web-terminal backend selector. {@code auto} (default) routes PostgreSQL to the JDBC driver and
+     * keeps other dialects on the obclient subprocess; {@code subprocess} forces the legacy path;
+     * {@code jdbc} forces JDBC for every dialect.
+     */
+    @Value("${odc.server.terminal.backend:auto}")
+    private String terminalBackend;
     /**
      * obclient可执行文件路径
      */
@@ -146,7 +155,7 @@ public class WebSocketServer {
         scheduleExecutor.scheduleWithFixedDelay(new Runnable() {
             @Override
             public void run() {
-                for (Map.Entry<Session, OBClientProxy> entry : connectionPool.entrySet()) {
+                for (Map.Entry<Session, ClientProxy> entry : connectionPool.entrySet()) {
                     log.debug("last access time: {}", entry.getValue().getLastAccessTime());
                     if (!entry.getValue().isAlive()) {
                         // backend thread is dead
@@ -198,7 +207,7 @@ public class WebSocketServer {
         addOnlineCount();
         try {
             log.info("obclient session initializing, resourceId={}, sessionId={}", resourceId, session.getId());
-            OBClientProxy proxy = connectObClient(resourceId, session);
+            ClientProxy proxy = connectObClient(resourceId, session);
             connectionPool.put(session, proxy);
             log.info("obclient session initialized, resourceId={}, sessionId={}", resourceId, session.getId());
         } catch (Exception e) {
@@ -218,7 +227,7 @@ public class WebSocketServer {
         return cmds;
     }
 
-    private OBClientProxy connectObClient(String resourceId, Session session) {
+    private ClientProxy connectObClient(String resourceId, Session session) {
         // GBK is not supported before OceanBase 1.4.79
         ConnectionConfig connectionConfig = connectionConfigProvider.getConnectionSession(resourceId, session);
         ConnectionSession connectionSession = sessionService.nullSafeGet(SidUtils.getSessionId(resourceId));
@@ -226,17 +235,30 @@ public class WebSocketServer {
         String schema = MoreObjects.firstNonNull(ConnectionSessionUtil.getCurrentSchema(connectionSession),
                 connectionConfig.getDefaultSchema());
 
+        // Output callback shared by both backends: each text chunk is wrapped as a stdout frame.
+        Consumer<String> stdoutConsumer = t -> {
+            WebSocketBody body = new WebSocketBody();
+            body.setMethod(STD_OUT);
+            body.setParams(new WebSocketParams(t));
+            sendMessage(session, body);
+        };
+
+        if (DialectType.POSTGRESQL.equals(connectionConfig.getDialectType())
+                && terminalBackendUseJdbc(connectionConfig)) {
+            // PostgreSQL: execute SQL through the server-side JDBC driver instead of spawning psql.
+            ClientProxy proxy = new JdbcClientProxy(connectionSession, stdoutConsumer);
+            proxy.connect(null);
+            log.info("PostgreSQL terminal established in JDBC mode, current connection number is {}, session id: {}",
+                    onlineNum, session.getId());
+            return proxy;
+        }
+
         String[] cmds = generateCmd(connectionConfig, supportSetGBK, schema);
 
         String userWorkDirectory = generateUserFolderPath(authenticationFacade.currentUserIdStr());
         log.debug("user work directory: {}", userWorkDirectory);
 
-        OBClientProxy proxy = new OBClientProxy(this.proxyExecutor, t -> {
-            WebSocketBody body = new WebSocketBody();
-            body.setMethod(STD_OUT);
-            body.setParams(new WebSocketParams(t));
-            sendMessage(session, body);
-        }, userWorkDirectory);
+        OBClientProxy proxy = new OBClientProxy(this.proxyExecutor, stdoutConsumer, userWorkDirectory);
         // do not print password
         String[] commandToPrint = StringUtils.isBlank(connectionConfig.getPassword()) ? cmds
                 : ArrayUtils.subarray(cmds, 0, cmds.length - 1);
@@ -245,6 +267,25 @@ public class WebSocketServer {
         log.info("{} has established connection with obclient, current connection number is {}, session id: {}",
                 getDbUser(connectionConfig), onlineNum, session.getId());
         return proxy;
+    }
+
+    /**
+     * Whether the JDBC-backed terminal backend should be used for the given datasource. Controlled by
+     * {@code odc.server.terminal.backend}: {@code auto} (default) routes PostgreSQL to JDBC and keeps
+     * other dialects on the obclient subprocess; {@code subprocess} forces the legacy path; {@code jdbc}
+     * forces JDBC for every dialect (currently only PostgreSQL is implemented).
+     */
+    private boolean terminalBackendUseJdbc(ConnectionConfig connectionConfig) {
+        String backend = terminalBackend == null ? "" : terminalBackend.trim().toLowerCase();
+        switch (backend) {
+            case "subprocess":
+                return false;
+            case "jdbc":
+                return true;
+            case "auto":
+            default:
+                return DialectType.POSTGRESQL.equals(connectionConfig.getDialectType());
+        }
     }
 
     private String[] generateCmd(ConnectionConfig connectionConfig, boolean supportSetGBK, String schema) {
@@ -359,7 +400,7 @@ public class WebSocketServer {
 
     @OnClose
     public void onClose(Session session) {
-        OBClientProxy proxy = connectionPool.remove(session);
+        ClientProxy proxy = connectionPool.remove(session);
         if (null != proxy) {
             proxy.close();
         }
@@ -369,7 +410,7 @@ public class WebSocketServer {
 
     @OnMessage
     public void onMessage(Session session, String message) {
-        OBClientProxy proxy = connectionPool.get(session);
+        ClientProxy proxy = connectionPool.get(session);
         if (Objects.isNull(proxy)) {
             log.warn("proxy not found by session, sessionId={}", session.getId());
             return;

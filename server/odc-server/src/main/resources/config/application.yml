@@ -88,3 +88,12 @@ management:
   endpoint:
     prometheus:
       enabled: ${odc.system.monitor.actuator.enabled:false}
+
+# Web terminal backend for the obclient command-line window.
+#   auto        - PostgreSQL runs through the server-side JDBC driver; other dialects spawn obclient.
+#   subprocess  - always spawn the local obclient/psql binary (legacy behaviour).
+#   jdbc        - always run through the JDBC driver (currently only PostgreSQL is implemented).
+odc:
+  server:
+    terminal:
+      backend: ${odc.server.terminal.backend:auto}

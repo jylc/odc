@@ -43,7 +43,7 @@ public class OBClientProxy implements ClientProxy {
     private ThreadPoolExecutor executor;
     private Consumer<String> messageConsumer;
     private String workDirectory;
-    private Long lastAccessTime;
+    private long lastAccessTime;
     private PtyProcess ptyProcess;
     private OutputStream ptyOutputStream;
     private OBClientReadThread readThread;
@@ -106,15 +106,18 @@ public class OBClientProxy implements ClientProxy {
         ptyOutputStream.flush();
     }
 
-    public void setLastAccessTime(Long accessTime) {
+    @Override
+    public void setLastAccessTime(long accessTime) {
         this.lastAccessTime = accessTime;
     }
 
-    public Long getLastAccessTime() {
+    @Override
+    public long getLastAccessTime() {
         return this.lastAccessTime;
     }
 
-    public Boolean isAlive() {
+    @Override
+    public boolean isAlive() {
         return this.ptyProcess.isRunning();
     }
 
