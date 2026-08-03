@@ -141,8 +141,7 @@ public class WebSocketServer {
     @Autowired
     public WebSocketServer(@Value("${obclient.file.path:/opt/odc/obclient/bin/obclient}") String obclientFilePath,
             @Value("${psql.file.path:/opt/odc/psql/bin/psql}")String psqlFilePath,
-            @Value("${odc.objectstorage.local.dir:#{systemProperties['user.home'].concat(T(java.io.File).separator).concat('data').concat"
-                    + "(T(java.io.File).separator).concat('files')}}") String baseObjectStorageDir) {
+            @Value("${odc.objectstorage.local.dir:${user.home}/data/files}") String baseObjectStorageDir) {
         this.obclientFilePath = obclientFilePath;
         this.psqlFilePath = psqlFilePath;
         this.baseScriptFilePath =

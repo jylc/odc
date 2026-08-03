@@ -96,4 +96,4 @@ management:
 odc:
   server:
     terminal:
-      backend: ${odc.server.terminal.backend:auto}
+      backend: ${ODC_TERMINAL_BACKEND:auto}
