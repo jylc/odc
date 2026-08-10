@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -30,7 +29,8 @@ import java.util.Optional;
 
 import org.apache.commons.lang3.Validate;
 
-import com.alibaba.fastjson.JSONObject;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.oceanbase.odc.common.json.JsonUtils;
 import com.oceanbase.odc.common.util.StringUtils;
 import com.oceanbase.odc.common.util.VersionUtils;
 import com.oceanbase.odc.core.session.ConnectionSessionUtil;
@@ -293,22 +293,19 @@ public class DebuggerSession extends AbstractDebugSession {
         } else {
             String jsonKV = result.get(0).getDefaultValue();
             if (StringUtils.isNotEmpty(jsonKV)) {
-                try {
-                    JSONObject jsonObject = JSONObject.parseObject(jsonKV);
-                    Iterator<Entry<String, Object>> iterator = jsonObject.entrySet().iterator();
-                    while (iterator.hasNext()) {
-                        PLDebugVariable odcGetValue = new PLDebugVariable();
-                        Entry<String, Object> keyValue = iterator.next();
-                        odcGetValue.setName(keyValue.getKey());
-                        if (keyValue.getValue() != null) {
-                            odcGetValue.setValue(keyValue.getValue().toString());
-                        }
-                        variables.add(odcGetValue);
-                    }
-                } catch (Exception e) {
-                    log.debug("Failed to parse `get_values` result", e);
+                Map<String, Object> jsonObject =
+                        JsonUtils.fromJson(jsonKV, new TypeReference<Map<String, Object>>() {});
+                if (jsonObject == null) {
                     throw OBException.executeFailed(ErrorCodes.DebugInfoParseFailed,
                             "Failed to parse `get_values` result");
+                }
+                for (Entry<String, Object> keyValue : jsonObject.entrySet()) {
+                    PLDebugVariable odcGetValue = new PLDebugVariable();
+                    odcGetValue.setName(keyValue.getKey());
+                    if (keyValue.getValue() != null) {
+                        odcGetValue.setValue(keyValue.getValue().toString());
+                    }
+                    variables.add(odcGetValue);
                 }
             }
         }

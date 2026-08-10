@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.Validate;
 
-import com.alibaba.fastjson.JSONObject;
+import com.oceanbase.odc.common.json.JsonUtils;
 import com.oceanbase.odc.core.sql.execute.cache.PageManager.Page;
 
 import lombok.Getter;
@@ -398,7 +398,7 @@ public class PagedRandomAccessFile implements Closeable {
         public static MetaInfo of(@NonNull String filePath) throws IOException {
             File metaInfoFile = getFile(filePath);
             String content = FileUtils.readFileToString(metaInfoFile);
-            MetaInfo metaInfo = JSONObject.parseObject(content, MetaInfo.class);
+            MetaInfo metaInfo = JsonUtils.fromJson(content, MetaInfo.class);
             if (metaInfo == null) {
                 return new MetaInfo();
             }
@@ -418,7 +418,7 @@ public class PagedRandomAccessFile implements Closeable {
 
         public static void write(@NonNull String filePath, @NonNull MetaInfo metaInfo) throws IOException {
             File metaInfoFile = getFile(filePath);
-            String jsonString = JSONObject.toJSONString(metaInfo);
+            String jsonString = JsonUtils.toJson(metaInfo);
             FileUtils.write(metaInfoFile, jsonString);
         }
 

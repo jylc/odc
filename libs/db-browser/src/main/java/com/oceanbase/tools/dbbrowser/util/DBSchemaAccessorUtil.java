@@ -32,7 +32,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.Validate;
 import org.apache.logging.log4j.util.Strings;
 
-import com.alibaba.fastjson.JSON;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.oceanbase.tools.dbbrowser.model.DBObjectType;
 import com.oceanbase.tools.dbbrowser.model.DBObjectWarningDescriptor;
 import com.oceanbase.tools.dbbrowser.model.DBTable.DBTableOptions;
@@ -74,7 +74,7 @@ public class DBSchemaAccessorUtil {
                 String jsonStr = "[".concat(description).concat("]");
                 jsonStr = StringUtils.replace(jsonStr, "(", "[");
                 jsonStr = StringUtils.replace(jsonStr, ")", "]");
-                String[][] valuesArrays = JSON.parseObject(jsonStr, String[][].class);
+                String[][] valuesArrays = new ObjectMapper().readValue(jsonStr, String[][].class);
                 if (Objects.isNull(valuesArrays)) {
                     return valuesList;
                 }

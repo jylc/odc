@@ -23,9 +23,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.StringHttpMessageConverter;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.web.client.RestTemplate;
 
-import com.alibaba.fastjson.support.spring.FastJsonHttpMessageConverter4;
 import com.google.common.collect.ImmutableList;
 import com.oceanbase.odc.core.shared.rest.OdcRestTemplate;
 import com.oceanbase.odc.service.common.util.IgnoreResponseErrorHandler;
@@ -40,12 +40,12 @@ public class RestTemplateConfig {
     @Bean("vpcRestTemplate")
     public RestTemplate vpcRestTemplate() {
         StringHttpMessageConverter stringHttpMc = new StringHttpMessageConverter(Charset.forName("UTF-8"));
-        FastJsonHttpMessageConverter4 fastJsonHttpMc = new FastJsonHttpMessageConverter4();
-        fastJsonHttpMc.setSupportedMediaTypes(ImmutableList
+        MappingJackson2HttpMessageConverter jacksonHttpMc = new MappingJackson2HttpMessageConverter();
+        jacksonHttpMc.setSupportedMediaTypes(ImmutableList
                 .of(MediaType.APPLICATION_JSON_UTF8, MediaType.APPLICATION_JSON, MediaType.MULTIPART_FORM_DATA,
                         MediaType.APPLICATION_FORM_URLENCODED));
         RestTemplate restTemplate = new RestTemplateBuilder()
-                .additionalMessageConverters(stringHttpMc, fastJsonHttpMc)
+                .additionalMessageConverters(stringHttpMc, jacksonHttpMc)
                 .setConnectTimeout(Duration.ofSeconds(5))
                 .setReadTimeout(Duration.ofSeconds(10))
                 .build();
