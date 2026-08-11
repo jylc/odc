@@ -61,6 +61,11 @@ public interface DatabaseRepository extends JpaRepository<DatabaseEntity, Long>,
 
     List<DatabaseEntity> findByIdInAndProjectIdIn(Collection<Long> ids, Collection<Long> projectIds);
 
+    @Query("select distinct t.connectionId from DatabaseEntity t where t.organizationId = :organizationId "
+            + "and t.projectId in :projectIds and t.connectionId is not null")
+    Set<Long> findConnectionIdByOrganizationIdAndProjectIdIn(@Param("organizationId") Long organizationId,
+            @Param("projectIds") Collection<Long> projectIds);
+
     @Modifying
     @Transactional
     @Query(value = "delete from connect_database t where t.connection_id in (:connectionIds)", nativeQuery = true)

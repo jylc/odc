@@ -395,6 +395,30 @@ public class DatabaseService {
                 Objects.nonNull(params.getIncludesPermittedAction()) && params.getIncludesPermittedAction());
     }
 
+    /**
+     * Lightweight alternative to {@link #statsConnectionConfig()} when only the set of connection
+     * ids related to the current user's joined projects is needed.
+     * <p>
+     * It avoids loading full {@code Database}/{@code ConnectionConfig} object graphs (which trigger
+     * batch fetches of projects, environments, attributes, owners, permissions, etc.) and instead
+     * issues a single projection query over {@code connect_database} plus one role lookup.
+     * Used by {@code ConnectionService.getTeamSpaceStatus} which only performs a {@code contains(connId)}
+     * check on the result.
+     */
+    @SkipAuthorize("internal authenticated")
+    public Set<Long> listConnectionIdsByJoinedProjects() {
+        if (authenticationFacade.currentUser().getOrganizationType() == OrganizationType.INDIVIDUAL) {
+            return connectionService.listByOrganizationId(authenticationFacade.currentOrganizationId()).stream()
+                    .map(ConnectionConfig::getId).collect(Collectors.toSet());
+        }
+        Set<Long> joinedProjectIds = projectService.getProjectId2ResourceRoleNames().keySet();
+        if (CollectionUtils.isEmpty(joinedProjectIds)) {
+            return Collections.emptySet();
+        }
+        return databaseRepository.findConnectionIdByOrganizationIdAndProjectIdIn(
+                authenticationFacade.currentOrganizationId(), joinedProjectIds);
+    }
+
     @SkipAuthorize("internal authenticated")
     public List<ConnectionConfig> statsConnectionConfig() {
         QueryDatabaseParams params = QueryDatabaseParams.builder().build();

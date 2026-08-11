@@ -523,8 +523,7 @@ public class ConnectionService {
         List<Permission> granted = res2Actions.entrySet().stream()
                 .map(e -> securityManager.getPermissionByActions(e.getKey(), e.getValue()))
                 .collect(Collectors.toList());
-        Set<Long> projectRelatedConnectionIds = databaseService.statsConnectionConfig().stream()
-                .map(ConnectionConfig::getId).collect(Collectors.toSet());
+        Set<Long> projectRelatedConnectionIds = databaseService.listConnectionIdsByJoinedProjects();
         Map<Long, CheckState> connId2State = new HashMap<>();
         for (Long connId : ids) {
             ConnectionConfig conn = connMap.get(connId);
