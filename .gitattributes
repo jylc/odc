@@ -1,0 +1,53 @@
+# Git line-ending and diff attributes for ODC
+#
+# Default: normalize all text files to LF in the repository.
+# Developers on Windows should set `git config core.autocrlf false` for this
+# repo (or leave the global `true`, since the eol rules below override it and
+# keep the working tree on LF, consistent with .editorconfig).
+
+# Default handling for text files: auto-detect + normalize to LF.
+* text=auto eol=lf
+
+# Source / config files: always LF.
+*.java       text eol=lf
+*.g4         text eol=lf
+*.sql        text eol=lf
+*.xml        text eol=lf
+*.yaml       text eol=lf
+*.yml        text eol=lf
+*.json       text eol=lf
+*.properties text eol=lf
+*.conf       text eol=lf
+*.csv        text eol=lf
+*.template   text eol=lf
+*.md         text eol=lf
+*.txt        text eol=lf
+*.rst        text eol=lf
+*.py         text eol=lf
+*.sh         text eol=lf
+*.rc         text eol=lf
+*.gitignore  text eol=lf
+*.gitmodules text eol=lf
+*.dockerignore text eol=lf
+*.editorconfig text eol=lf
+*.importorder  text eol=lf
+*.factories   text eol=lf
+*.secignore   text eol=lf
+*.scanignore  text eol=lf
+
+# Windows-only scripts: keep CRLF for native execution.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files: never touch, never diff as text.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.jar  binary
+*.zip  binary
+*.xlsx binary
+*.pem  binary
+*.bin  binary

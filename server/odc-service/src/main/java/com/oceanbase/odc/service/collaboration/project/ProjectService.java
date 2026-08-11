@@ -254,8 +254,7 @@ public class ProjectService {
         List<UserResourceRole> userResourceRoles =
                 resourceRoleService.listByResourceTypeAndResourceId(ResourceType.ODC_PROJECT, entity.getId(),
                         organizationId);
-        return userResourceRoles.stream().map(this::fromUserResourceRole).filter(Objects::nonNull)
-                .collect(Collectors.toList());
+        return buildProjectMembers(userResourceRoles);
     }
 
     @SkipAuthorize("odc internal usage")
@@ -612,8 +611,7 @@ public class ProjectService {
 
     private Project entityToModelWithoutCurrentUser(ProjectEntity entity, List<UserResourceRole> userResourceRoles) {
         Project project = projectMapper.entityToModel(entity);
-        project.setMembers(userResourceRoles.stream().map(this::fromUserResourceRole).filter(Objects::nonNull)
-                .collect(Collectors.toList()));
+        project.setMembers(buildProjectMembers(userResourceRoles));
         return project;
     }
 
@@ -626,20 +624,35 @@ public class ProjectService {
         return project;
     }
 
-    private ProjectMember fromUserResourceRole(UserResourceRole userResourceRole) {
-        Optional<UserEntity> userOpt = userRepository.findById(userResourceRole.getUserId());
-        if (!userOpt.isPresent()) {
-            return null;
+    /**
+     * Batch build {@link ProjectMember}s from {@link UserResourceRole}s.
+     * <p>
+     * Replaces the previous per-member {@code userRepository.findById} lookup to avoid an N+1 query
+     * (members × projects). All users are fetched in a single {@link UserRepository#findByIdIn(Collection)}
+     * call and assembled in memory.
+     */
+    private List<ProjectMember> buildProjectMembers(List<UserResourceRole> userResourceRoles) {
+        if (CollectionUtils.isEmpty(userResourceRoles)) {
+            return Collections.emptyList();
         }
-        UserEntity user = userOpt.get();
-        ProjectMember member = new ProjectMember();
-        member.setRole(userResourceRole.getResourceRole());
-        member.setId(userResourceRole.getUserId());
-        member.setName(user.getName());
-        member.setAccountName(user.getAccountName());
-        member.setUserEnabled(user.isEnabled());
-        member.setDerivedFromGlobalProjectRole(userResourceRole.isDerivedFromGlobalProjectRole());
-        return member;
+        Set<Long> userIds =
+                userResourceRoles.stream().map(UserResourceRole::getUserId).collect(Collectors.toSet());
+        Map<Long, UserEntity> id2User = userRepository.findByIdIn(userIds).stream()
+                .collect(Collectors.toMap(UserEntity::getId, Function.identity()));
+        return userResourceRoles.stream().map(userResourceRole -> {
+            UserEntity user = id2User.get(userResourceRole.getUserId());
+            if (user == null) {
+                return null;
+            }
+            ProjectMember member = new ProjectMember();
+            member.setRole(userResourceRole.getResourceRole());
+            member.setId(userResourceRole.getUserId());
+            member.setName(user.getName());
+            member.setAccountName(user.getAccountName());
+            member.setUserEnabled(user.isEnabled());
+            member.setDerivedFromGlobalProjectRole(userResourceRole.isDerivedFromGlobalProjectRole());
+            return member;
+        }).filter(Objects::nonNull).collect(Collectors.toList());
     }
 
     private ProjectEntity modelToEntity(Project project) {
