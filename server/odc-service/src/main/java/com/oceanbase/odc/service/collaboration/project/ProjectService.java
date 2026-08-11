@@ -332,11 +332,21 @@ public class ProjectService {
     public Page<Project> list(@Valid QueryProjectParams params, @NotNull Pageable pageable) {
         params.setUserId(currentUserId());
         Page<ProjectEntity> projectEntities = innerList(params, pageable, UserResourceRole::isProjectMember);
-        return projectEntities.map(project -> {
-            List<UserResourceRole> members =
-                    resourceRoleService.listByResourceTypeAndResourceId(ResourceType.ODC_PROJECT, project.getId());
-            return entityToModel(project, members);
-        });
+        if (projectEntities.isEmpty()) {
+            return projectEntities.map(projectMapper::entityToModel);
+        }
+        // Batch-prefetch everything the per-project assembly needs, so the map() below stays O(1)
+        // per project instead of issuing DB queries inside the loop (N+1 avoidance).
+        List<Long> projectIds =
+                projectEntities.getContent().stream().map(ProjectEntity::getId).collect(Collectors.toList());
+        Map<Long, List<UserResourceRole>> projectId2Members =
+                resourceRoleService.listByResourceTypeAndResourceIdIn(ResourceType.ODC_PROJECT, projectIds).stream()
+                        .collect(Collectors.groupingBy(UserResourceRole::getResourceId));
+        Map<Long, Set<ResourceRoleName>> projectId2RoleNames = getProjectId2ResourceRoleNames();
+        InnerUser currentUser = currentInnerUser();
+        return projectEntities.map(
+                project -> assembleProject(project, projectId2Members.getOrDefault(project.getId(), Collections.emptyList()),
+                        projectId2RoleNames, currentUser));
     }
 
     @SkipAuthorize("odc internal usage")
@@ -606,6 +616,24 @@ public class ProjectService {
         project.setLastModifier(currentInnerUser());
         project.setCurrentUserResourceRoles(
                 getProjectId2ResourceRoleNames().getOrDefault(project.getId(), Collections.EMPTY_SET));
+        return project;
+    }
+
+    /**
+     * Assemble a {@link Project} from a {@link ProjectEntity} using prefetched context.
+     * <p>
+     * Variant of {@link #entityToModel(ProjectEntity, List)} for batch scenarios (e.g. {@link #list}):
+     * accepts already-fetched members, role-name map and current user so no DB query is issued per
+     * project, avoiding the N+1 that the single-entity overload would produce when mapped over a page.
+     */
+    private Project assembleProject(ProjectEntity entity, List<UserResourceRole> members,
+            Map<Long, Set<ResourceRoleName>> projectId2RoleNames, InnerUser currentUser) {
+        Project project = projectMapper.entityToModel(entity);
+        project.setMembers(buildProjectMembers(members));
+        project.setCreator(currentUser);
+        project.setLastModifier(currentUser);
+        project.setCurrentUserResourceRoles(
+                projectId2RoleNames.getOrDefault(project.getId(), Collections.EMPTY_SET));
         return project;
     }
 
