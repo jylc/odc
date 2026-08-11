@@ -38,6 +38,7 @@ import javax.validation.constraints.NotNull;
 import org.apache.commons.io.FileExistsException;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.StringUtils;
+import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.validation.annotation.Validated;
@@ -262,6 +263,7 @@ public class ConnectSessionService {
     public ConnectionSession create(@NotNull CreateSessionReq req) {
         Long dataSourceId;
         String schemaName;
+        ConnectionConfig connection = null;
         if (req.getDbId() != null) {
             // create session by database id
             Database database = databaseService.detail(req.getDbId());
@@ -273,6 +275,9 @@ public class ConnectSessionService {
             }
             schemaName = database.getName();
             dataSourceId = database.getDataSource().getId();
+            // Reuse the ConnectionConfig already loaded by databaseService.detail to avoid a
+            // duplicate repository + attribute query and password adaptation.
+            connection = database.getDataSource();
         } else {
             // create session by datasource id
             PreConditions.notNull(req.getDsId(), "DatasourceId");
@@ -284,7 +289,9 @@ public class ConnectSessionService {
             dataSourceId = req.getDsId();
         }
         preCheckSessionLimit();
-        ConnectionConfig connection = connectionService.getForConnectionSkipPermissionCheck(dataSourceId);
+        if (connection == null) {
+            connection = connectionService.getForConnectionSkipPermissionCheck(dataSourceId);
+        }
         cloudMetadataClient.checkPermission(OBTenant.of(connection.getClusterName(),
                 connection.getTenantName()), connection.getInstanceType(), false, CloudPermissionAction.READONLY);
         PreConditions.validArgumentState(Objects.nonNull(connection.getPassword()),
@@ -551,10 +558,10 @@ public class ConnectSessionService {
             if (Objects.isNull(database.getProject())) {
                 throw new AccessDeniedException();
             }
-            Map<Long, Set<DatabasePermissionType>> id2PermissionTypes =
-                    permissionHelper.getDBPermissions(Collections.singleton(database.getId()));
-            if (!id2PermissionTypes.containsKey(database.getId())
-                    || id2PermissionTypes.get(database.getId()).isEmpty()) {
+            // Reuse the authorizedPermissionTypes already populated by databaseService.detail
+            // (which calls entityToModel with includesPermittedAction=true) instead of querying again.
+            Set<DatabasePermissionType> permissionTypes = database.getAuthorizedPermissionTypes();
+            if (CollectionUtils.isEmpty(permissionTypes)) {
                 throw new AccessDeniedException();
             }
         }
