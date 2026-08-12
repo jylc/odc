@@ -12,6 +12,8 @@
 # ignore specific directories
 .idea
 .repository/
+.zcode/
+.claude/
 target
 _build/
 conf/
