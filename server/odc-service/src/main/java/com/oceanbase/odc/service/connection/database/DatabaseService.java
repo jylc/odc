@@ -253,7 +253,16 @@ public class DatabaseService {
         Database database = detailSkipPermissionCheck(id);
         horizontalDataPermissionValidator.checkCurrentOrganization(database);
         if (Objects.nonNull(database.getProject()) && Objects.nonNull(database.getProject().getId())) {
-            projectPermissionValidator.checkProjectRole(database.getProject().getId(), ResourceRoleName.all());
+            // Directly check the user's project role map instead of going through the security framework
+            // (securityManager.isPermitted), which would load ALL user permissions via 3 authorizers and
+            // is extremely expensive when the user belongs to thousands of projects.
+            // Semantically equivalent: both check iam_user_resource_role for ODC_PROJECT membership.
+            // The iam_permission table never contains ODC_PROJECT entries, so the DefaultAuthorizer path
+            // contributes nothing to project role checks.
+            if (!projectService.getProjectId2ResourceRoleNames()
+                    .containsKey(database.getProject().getId())) {
+                throw new AccessDeniedException();
+            }
             return database;
         }
         Permission requiredPermission = this.securityManager
