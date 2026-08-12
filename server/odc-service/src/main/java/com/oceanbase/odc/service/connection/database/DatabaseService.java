@@ -1206,7 +1206,7 @@ public class DatabaseService {
     private Database innerDetailForTask(DatabaseEntity entity) {
         Database model = databaseMapper.entityToModel(entity);
         if (Objects.nonNull(entity.getProjectId())) {
-            model.setProject(projectService.detail(entity.getProjectId()));
+            model.setProject(projectService.getBasicSkipPermissionCheck(entity.getProjectId()));
         }
         // for logical database, the connection id may be null
         if (entity.getConnectionId() != null) {
@@ -1220,7 +1220,7 @@ public class DatabaseService {
     private Database entityToModel(DatabaseEntity entity, boolean includesPermittedAction) {
         Database model = databaseMapper.entityToModel(entity);
         if (Objects.nonNull(entity.getProjectId())) {
-            model.setProject(projectService.detail(entity.getProjectId()));
+            model.setProject(projectService.getBasicSkipPermissionCheck(entity.getProjectId()));
         }
         // for logical database, the connection id may be null
         if (entity.getConnectionId() != null) {
