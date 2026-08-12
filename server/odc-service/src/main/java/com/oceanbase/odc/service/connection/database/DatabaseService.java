@@ -102,7 +102,6 @@ import com.oceanbase.odc.service.collaboration.environment.model.Environment;
 import com.oceanbase.odc.service.collaboration.environment.model.QueryEnvironmentParam;
 import com.oceanbase.odc.service.collaboration.project.ProjectService;
 import com.oceanbase.odc.service.collaboration.project.model.Project;
-import com.oceanbase.odc.service.collaboration.project.model.QueryProjectParams;
 import com.oceanbase.odc.service.common.model.InnerUser;
 import com.oceanbase.odc.service.connection.ConnectionService;
 import com.oceanbase.odc.service.connection.ConnectionSyncHistoryService;
@@ -347,11 +346,7 @@ public class DatabaseService {
                 .and(DatabaseSpecs.connectTypeIn(params.getConnectTypes()))
                 .and(DatabaseSpecs.existedEquals(params.getExisted()))
                 .and(DatabaseSpecs.organizationIdEquals(authenticationFacade.currentOrganizationId()));
-        Set<Long> joinedProjectIds =
-                projectService
-                        .list(QueryProjectParams.builder().build(), Pageable.unpaged())
-                        .getContent().stream()
-                        .filter(Objects::nonNull).map(Project::getId).collect(Collectors.toSet());
+        Set<Long> joinedProjectIds = projectService.getProjectId2ResourceRoleNames().keySet();
         /**
          * not joined any projects and does not show unassigned databases
          */
