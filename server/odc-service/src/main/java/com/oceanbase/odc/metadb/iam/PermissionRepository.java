@@ -66,6 +66,25 @@ public interface PermissionRepository
             @Param("userStatus") Boolean userStatus, @Param("roleStatus") Boolean roleStatus,
             @Param("organizationId") Long organizationId);
 
+    /**
+     * Lightweight existence check mirroring
+     * {@link #findByUserIdAndUserStatusAndRoleStatusAndOrganizationId} but restricted to the given resource
+     * identifiers and actions, returning a count instead of materializing all permissions of the user.
+     */
+    @Query(value = "select count(*) from (select p.id from (select id from iam_user where id=:userId "
+            + "and is_enabled=true) u inner join iam_user_role u_r on u.id=u_r.user_id inner join "
+            + "(select id from iam_role where is_enabled=true) r on u_r.role_id=r.id inner join "
+            + "iam_role_permission r_p on r.id=r_p.role_id inner join (select * from iam_permission where "
+            + "organization_id=:organizationId) p on r_p.permission_id=p.id where p.expire_time > now() "
+            + "and p.resource_identifier in (:identifiers) and p.action in (:actions) union all "
+            + "select p.id from (select id from iam_user where id=:userId and is_enabled=true) u inner join "
+            + "iam_user_permission u_p on u.id=u_p.user_id inner join (select * from iam_permission where "
+            + "organization_id=:organizationId) p on u_p.permission_id=p.id where p.expire_time > now() "
+            + "and p.resource_identifier in (:identifiers) and p.action in (:actions)) t", nativeQuery = true)
+    long countByUserIdAndOrganizationIdAndResourceIdentifierInAndActionIn(@Param("userId") Long userId,
+            @Param("organizationId") Long organizationId, @Param("identifiers") Collection<String> identifiers,
+            @Param("actions") Collection<String> actions);
+
     @Query(value = "select p.* from iam_role r inner join iam_role_permission r_p on r.id=r_p.role_id inner " +
             "join iam_permission p on r_p.permission_id=p.id where r.id in (:roleIds) and p.expire_time > now()",
             nativeQuery = true)

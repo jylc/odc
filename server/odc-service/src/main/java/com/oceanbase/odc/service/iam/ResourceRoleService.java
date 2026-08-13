@@ -292,6 +292,20 @@ public class ResourceRoleService {
         return userResourceRoles;
     }
 
+    /**
+     * Equivalent to {@code getProjectId2ResourceRoleNames(organizationId, userId).containsKey(projectId)} but
+     * avoids loading all project roles of the user, which is expensive when the user belongs to thousands of
+     * projects. Membership holds when the user has a direct {@code ODC_PROJECT} resource role on the target
+     * project, or holds any global project role which implicitly grants membership of every project.
+     */
+    @SkipAuthorize("odc internal usage")
+    public boolean isProjectMember(@NonNull Long organizationId, @NonNull Long userId, @NonNull Long projectId) {
+        return userResourceRoleRepository.countByOrganizationIdAndUserIdAndResourceIdAndResourceType(
+                organizationId, userId, projectId, ResourceType.ODC_PROJECT) > 0
+                || !globalResourceRoleService
+                        .findGlobalResourceRoleUsersByOrganizationIdAndUserId(organizationId, userId).isEmpty();
+    }
+
     @SkipAuthorize("internal usage")
     public List<UserResourceRole> listByUserId(Long userId) {
         List<UserResourceRole> userResourceRoles = fromEntities(userResourceRoleRepository

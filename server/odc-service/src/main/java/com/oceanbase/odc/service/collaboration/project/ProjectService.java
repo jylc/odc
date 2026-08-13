@@ -562,6 +562,15 @@ public class ProjectService {
         return projectId2Members;
     }
 
+    /**
+     * Lightweight single-project membership check for the current user, equivalent to
+     * {@code getProjectId2ResourceRoleNames().containsKey(projectId)} but without loading all project roles.
+     */
+    @SkipAuthorize("odc internal usage")
+    public boolean isProjectMember(@NonNull Long projectId) {
+        return resourceRoleService.isProjectMember(currentOrganizationId(), currentUserId(), projectId);
+    }
+
     @SkipAuthorize("internal usage")
     public Set<Long> getMemberProjectIds(Long userId) {
         return resourceRoleService.listByUserId(userId).stream().filter(UserResourceRole::isProjectMember)

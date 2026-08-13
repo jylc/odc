@@ -67,8 +67,6 @@ import org.springframework.validation.annotation.Validated;
 import com.oceanbase.odc.common.event.LocalEventPublisher;
 import com.oceanbase.odc.common.json.JsonUtils;
 import com.oceanbase.odc.common.util.StringUtils;
-import com.oceanbase.odc.core.authority.SecurityManager;
-import com.oceanbase.odc.core.authority.permission.Permission;
 import com.oceanbase.odc.core.authority.util.Authenticated;
 import com.oceanbase.odc.core.authority.util.PreAuthenticate;
 import com.oceanbase.odc.core.authority.util.SkipAuthorize;
@@ -126,6 +124,7 @@ import com.oceanbase.odc.service.db.schema.model.DBObjectSyncStatus;
 import com.oceanbase.odc.service.db.schema.syncer.DBSchemaSyncProperties;
 import com.oceanbase.odc.service.iam.HorizontalDataPermissionValidator;
 import com.oceanbase.odc.service.iam.OrganizationService;
+import com.oceanbase.odc.service.iam.PermissionQueryService;
 import com.oceanbase.odc.service.iam.ProjectPermissionValidator;
 import com.oceanbase.odc.service.iam.ResourceRoleService;
 import com.oceanbase.odc.service.iam.UserService;
@@ -224,7 +223,7 @@ public class DatabaseService {
     private UserService userService;
 
     @Autowired
-    private SecurityManager securityManager;
+    private PermissionQueryService permissionQueryService;
 
     @Autowired
     private DBSchemaSyncTaskManager dbSchemaSyncTaskManager;
@@ -253,21 +252,19 @@ public class DatabaseService {
         Database database = detailSkipPermissionCheck(id);
         horizontalDataPermissionValidator.checkCurrentOrganization(database);
         if (Objects.nonNull(database.getProject()) && Objects.nonNull(database.getProject().getId())) {
-            // Directly check the user's project role map instead of going through the security framework
-            // (securityManager.isPermitted), which would load ALL user permissions via 3 authorizers and
-            // is extremely expensive when the user belongs to thousands of projects.
-            // Semantically equivalent: both check iam_user_resource_role for ODC_PROJECT membership.
-            // The iam_permission table never contains ODC_PROJECT entries, so the DefaultAuthorizer path
-            // contributes nothing to project role checks.
-            if (!projectService.getProjectId2ResourceRoleNames()
-                    .containsKey(database.getProject().getId())) {
+            // Lightweight single-project membership check instead of loading the user's full project-role map
+            // (getProjectId2ResourceRoleNames), which is expensive when the user belongs to thousands of
+            // projects. Semantically equivalent to the previous containsKey check: both verify membership of
+            // the target project via iam_user_resource_role or a global project role.
+            if (!projectService.isProjectMember(database.getProject().getId())) {
                 throw new AccessDeniedException();
             }
             return database;
         }
-        Permission requiredPermission = this.securityManager
-                .getPermissionByActions(database.getDataSource(), Collections.singletonList("read"));
-        if (this.securityManager.isPermitted(requiredPermission)) {
+        // Check iam_permission directly instead of securityManager.isPermitted, which would load all user
+        // permissions and resource-roles via the authorizers (expensive when the user belongs to thousands of
+        // projects). Only the iam_permission path contributes to a ConnectionPermission read check.
+        if (permissionQueryService.hasConnectionReadPermission(database.getDataSource())) {
             return database;
         }
         throw new NotFoundException(ResourceType.ODC_DATABASE, "id", id);
