@@ -35,7 +35,6 @@ import java.util.stream.Collectors;
 
 import javax.validation.constraints.NotNull;
 
-import org.apache.commons.collections4.ListUtils;
 import org.apache.commons.lang.Validate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -50,7 +49,6 @@ import com.oceanbase.odc.core.authority.permission.DatabasePermission;
 import com.oceanbase.odc.core.authority.permission.Permission;
 import com.oceanbase.odc.core.authority.permission.ProjectPermission;
 import com.oceanbase.odc.core.authority.permission.ResourcePermission;
-import com.oceanbase.odc.core.authority.permission.ResourceRoleBasedPermission;
 import com.oceanbase.odc.core.shared.constant.PermissionType;
 import com.oceanbase.odc.core.shared.constant.ResourceType;
 import com.oceanbase.odc.core.shared.exception.InternalServerError;
@@ -59,10 +57,7 @@ import com.oceanbase.odc.metadb.iam.PermissionRepository;
 import com.oceanbase.odc.metadb.iam.PermissionSpecs;
 import com.oceanbase.odc.metadb.iam.UserEntity;
 import com.oceanbase.odc.metadb.iam.UserRepository;
-import com.oceanbase.odc.metadb.iam.resourcerole.UserResourceRoleEntity;
 import com.oceanbase.odc.service.iam.ResourcePermissionExtractor;
-import com.oceanbase.odc.service.iam.ResourceRoleBasedPermissionExtractor;
-import com.oceanbase.odc.service.iam.ResourceRoleService;
 import com.oceanbase.odc.service.iam.model.User;
 import com.oceanbase.odc.service.resourcegroup.model.ResourceIdentifier;
 
@@ -75,11 +70,7 @@ public abstract class DefaultAuthorizationFacade implements AuthorizationFacade 
     @Autowired
     private ResourcePermissionExtractor permissionMapper;
     @Autowired
-    private ResourceRoleBasedPermissionExtractor resourceRoleBasedPermissionExtractor;
-    @Autowired
     private PermissionRepository repository;
-    @Autowired
-    private ResourceRoleService resourceRoleService;
     @Autowired
     private UserRepository userRepository;
     @Autowired
@@ -93,7 +84,7 @@ public abstract class DefaultAuthorizationFacade implements AuthorizationFacade 
 
     @Override
     public Set<String> getAllPermittedActions(Principal principal, ResourceType resourceType, String resourceId) {
-        List<Permission> permissions = getAllPermissions(principal);
+        List<Permission> permissions = getAllResourcePermissions(principal);
         Set<String> returnVal = new HashSet<>();
         for (Permission permission : permissions) {
             if (permission instanceof ResourcePermission) {
@@ -156,9 +147,7 @@ public abstract class DefaultAuthorizationFacade implements AuthorizationFacade 
 
     @Override
     public Map<SecurityResource, Set<String>> getRelatedResourcesAndActions(Principal principal) {
-        List<Permission> permissions = getAllPermissions(principal).stream()
-                .filter(permission -> !(permission instanceof ResourceRoleBasedPermission)).collect(
-                        Collectors.toList());
+        List<Permission> permissions = getAllResourcePermissions(principal);
         Map<SecurityResource, Set<String>> returnVal = new HashMap<>();
         for (Permission permission : permissions) {
             SecurityResource resource = new DefaultSecurityResource(((ResourcePermission) permission).getResourceId(),
@@ -194,7 +183,14 @@ public abstract class DefaultAuthorizationFacade implements AuthorizationFacade 
         return user;
     }
 
-    private List<Permission> getAllPermissions(Principal principal) {
+    /**
+     * Only loads permissions derived from {@code iam_permission}, deliberately skipping user resource-roles.
+     * Neither {@link #getAllPermittedActions} (guards with {@code instanceof ResourcePermission}) nor
+     * {@link #getRelatedResourcesAndActions} (used to filter out ResourceRoleBasedPermission) ever consumed
+     * the resource-role part, while loading it costs a full {@code iam_user_resource_role} scan which is
+     * expensive when the user belongs to thousands of projects.
+     */
+    private List<Permission> getAllResourcePermissions(Principal principal) {
         if (!(principal instanceof User)) {
             throw new InternalServerError("Principal has to be an instance of User");
         }
@@ -203,13 +199,7 @@ public abstract class DefaultAuthorizationFacade implements AuthorizationFacade 
                 .findByUserIdAndRoleStatusAndOrganizationId(odcUser.getId(), true,
                         authenticationFacade.currentOrganizationId())
                 .stream().filter(permission -> !Objects.isNull(permission)).collect(Collectors.toList());
-        List<UserResourceRoleEntity> resourceRoles =
-                resourceRoleService
-                        .listByOrganizationIdAndUserId(authenticationFacade.currentOrganizationId(), odcUser.getId())
-                        .stream()
-                        .filter(Objects::nonNull).map(ResourceRoleService::toEntity).collect(Collectors.toList());
-        return ListUtils.union(permissionMapper.getResourcePermissions(permissionEntityList),
-                resourceRoleBasedPermissionExtractor.getResourcePermissions(resourceRoles));
+        return permissionMapper.getResourcePermissions(permissionEntityList);
     }
 
     private Map<User, Set<String>> findActionsByPermissionEntities(List<PermissionEntity> entities) {

@@ -306,6 +306,29 @@ public class ResourceRoleService {
                         .findGlobalResourceRoleUsersByOrganizationIdAndUserId(organizationId, userId).isEmpty();
     }
 
+    /**
+     * Equivalent to {@code ResourceRoleBasedPermission(ODC_PROJECT, projectId, roleNames)} being implied by
+     * the user's resource-roles, i.e. the user holds any of {@code roleNames} on the target project. Global
+     * project roles implicitly grant the corresponding role on every project, so a non-empty intersection
+     * between the user's global roles and {@code roleNames} also holds. Avoids loading all project roles of
+     * the user, which is expensive when the user belongs to thousands of projects.
+     */
+    @SkipAuthorize("odc internal usage")
+    public boolean hasAnyProjectRole(@NonNull Long organizationId, @NonNull Long userId, @NonNull Long projectId,
+            @NonNull Collection<ResourceRoleName> roleNames) {
+        if (roleNames.isEmpty()) {
+            return false;
+        }
+        List<String> roleNameStrings = roleNames.stream().map(ResourceRoleName::name).collect(Collectors.toList());
+        if (userResourceRoleRepository.countByOrganizationIdAndUserIdAndResourceIdAndResourceTypeAndRoleNames(
+                organizationId, userId, projectId, ResourceType.ODC_PROJECT, roleNameStrings) > 0) {
+            return true;
+        }
+        return globalResourceRoleService
+                .findGlobalResourceRoleUsersByOrganizationIdAndUserId(organizationId, userId).stream()
+                .map(UserGlobalResourceRole::getResourceRole).anyMatch(roleNames::contains);
+    }
+
     @SkipAuthorize("internal usage")
     public List<UserResourceRole> listByUserId(Long userId) {
         List<UserResourceRole> userResourceRoles = fromEntities(userResourceRoleRepository

@@ -16,6 +16,7 @@
 package com.oceanbase.odc.service.iam;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
@@ -74,12 +75,24 @@ public class PermissionQueryService {
      */
     @SkipAuthorize("odc internal usage")
     public boolean hasConnectionReadPermission(@NonNull ConnectionConfig dataSource) {
-        Long connectionId = dataSource.getId();
-        String resourceType = dataSource.resourceType();
-        Set<String> identifiers = buildConnectionReadIdentifiers(resourceType, connectionId);
-        Set<String> actions = ResourceType.ODC_CONNECTION.name().equals(resourceType)
-                ? CONNECTION_READ_ACTIONS
-                : PRIVATE_CONNECTION_READ_ACTIONS;
+        ResourceType resourceType = ResourceType.ODC_CONNECTION.name().equals(dataSource.resourceType())
+                ? ResourceType.ODC_CONNECTION
+                : ResourceType.ODC_PRIVATE_CONNECTION;
+        Set<String> actions =
+                resourceType == ResourceType.ODC_CONNECTION ? CONNECTION_READ_ACTIONS : PRIVATE_CONNECTION_READ_ACTIONS;
+        return hasActionPermission(resourceType, dataSource.getId(), actions);
+    }
+
+    /**
+     * Equivalent to {@code securityManager.isPermitted(permissionProvider.getPermissionByActions(resource,
+     * actions))} but avoids loading all user permissions/resource-roles via the authorizers, which is expensive
+     * when the user belongs to thousands of projects. {@code actions} must already be closed under implication,
+     * i.e. contain every stored action string whose mask implies the required one.
+     */
+    @SkipAuthorize("odc internal usage")
+    public boolean hasActionPermission(@NonNull ResourceType resourceType, @NonNull Long resourceId,
+            @NonNull Collection<String> actions) {
+        Set<String> identifiers = buildIdentifiers(resourceType, resourceId);
         return permissionRepository.countByUserIdAndOrganizationIdAndResourceIdentifierInAndActionIn(
                 authenticationFacade.currentUserId(),
                 authenticationFacade.currentOrganizationId(), identifiers, actions) > 0;
@@ -87,19 +100,19 @@ public class PermissionQueryService {
 
     /**
      * Build the set of {@code iam_permission.resource_identifier} values whose expanded SecurityResource
-     * {@code implies} the target connection: direct id, type wildcard, global wildcard, and every enabled
-     * resource group that contains the connection.
+     * {@code implies} the target resource: direct id, type wildcard, global wildcard, and every enabled
+     * resource group that contains the resource.
      */
-    private Set<String> buildConnectionReadIdentifiers(String resourceType, Long connectionId) {
+    private Set<String> buildIdentifiers(ResourceType resourceType, Long resourceId) {
         Set<String> identifiers = new HashSet<>();
-        identifiers.add(resourceType + ":" + connectionId);
-        identifiers.add(resourceType + ":*");
+        identifiers.add(resourceType.name() + ":" + resourceId);
+        identifiers.add(resourceType.name() + ":*");
         identifiers.add("*");
         // Resource groups only apply to ORGANIZATION-scoped connections; findByConnectionId already restricts
         // visible_scope='ORGANIZATION'. Disabled groups are excluded to match ResourcePermissionExtractor,
         // which does not expand disabled resource groups.
-        if (ResourceType.ODC_CONNECTION.name().equals(resourceType)) {
-            for (ResourceGroupEntity group : resourceGroupRepository.findByConnectionId(connectionId)) {
+        if (resourceType == ResourceType.ODC_CONNECTION) {
+            for (ResourceGroupEntity group : resourceGroupRepository.findByConnectionId(resourceId)) {
                 if (group.isEnabled()) {
                     identifiers.add(ResourceType.ODC_RESOURCE_GROUP.name() + ":" + group.getId() + "/"
                             + ResourceType.ODC_CONNECTION.name() + ":*");

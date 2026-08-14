@@ -114,6 +114,16 @@ public interface UserResourceRoleRepository extends OdcJpaRepository<UserResourc
             @Param("userId") Long userId, @Param("resourceId") Long resourceId,
             @Param("resourceType") ResourceType resourceType);
 
+    @Query(value = "select count(*) from iam_user_resource_role i_urr inner join iam_resource_role i_rr on "
+            + "i_urr.resource_role_id = i_rr.id where i_urr.organization_id = :organizationId "
+            + "and i_urr.user_id = :userId and i_urr.resource_id = :resourceId "
+            + "and i_rr.resource_type = :#{#resourceType.name()} and i_rr.role_name in (:roleNames)",
+            nativeQuery = true)
+    long countByOrganizationIdAndUserIdAndResourceIdAndResourceTypeAndRoleNames(
+            @Param("organizationId") Long organizationId, @Param("userId") Long userId,
+            @Param("resourceId") Long resourceId, @Param("resourceType") ResourceType resourceType,
+            @Param("roleNames") Collection<String> roleNames);
+
     default List<UserResourceRoleEntity> batchCreate(List<UserResourceRoleEntity> entities) {
         String sql = InsertSqlTemplateBuilder.from("iam_user_resource_role")
                 .field(UserResourceRoleEntity_.userId)

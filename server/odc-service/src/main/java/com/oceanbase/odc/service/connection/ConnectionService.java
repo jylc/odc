@@ -121,8 +121,10 @@ import com.oceanbase.odc.service.encryption.EncryptionFacade;
 import com.oceanbase.odc.service.flow.model.BinaryDataResult;
 import com.oceanbase.odc.service.flow.model.ByteArrayDataResult;
 import com.oceanbase.odc.service.iam.HorizontalDataPermissionValidator;
+import com.oceanbase.odc.service.iam.PermissionQueryService;
 import com.oceanbase.odc.service.iam.PermissionService;
 import com.oceanbase.odc.service.iam.ProjectPermissionValidator;
+import com.oceanbase.odc.service.iam.ResourceRoleService;
 import com.oceanbase.odc.service.iam.UserPermissionService;
 import com.oceanbase.odc.service.iam.auth.AuthenticationFacade;
 import com.oceanbase.odc.service.iam.auth.AuthorizationFacade;
@@ -162,6 +164,12 @@ public class ConnectionService {
 
     @Autowired
     private AuthorizationFacade authorizationFacade;
+
+    @Autowired
+    private ResourceRoleService resourceRoleService;
+
+    @Autowired
+    private PermissionQueryService permissionQueryService;
 
     @Autowired
     private PermissionService permissionService;
@@ -436,10 +444,22 @@ public class ConnectionService {
     }
 
     @Transactional(rollbackFor = Exception.class)
-    @PreAuthenticate(hasAnyResourceRole = {"OWNER, DBA, DEVELOPER, SECURITY_ADMINISTRATOR"},
-            actions = {"OWNER", "DBA", "SECURITY_ADMINISTRATOR"},
-            resourceType = "ODC_PROJECT", indexOfIdParam = 0)
+    @SkipAuthorize("permission check inside")
     public PaginatedData<ConnectionConfig> listByProjectId(@NotNull Long projectId, @NotNull Boolean basic) {
+        // In-method equivalent of the previous @PreAuthenticate(hasAnyResourceRole/actions) check, which went
+        // through securityManager and loaded ALL user permissions/resource-roles via the authorizers —
+        // extremely expensive when the user belongs to thousands of projects. Semantics preserved as the OR
+        // of the original two branches: any of the four resource-roles on the project (global roles expanded
+        // implicitly), or an iam_permission row on ODC_PROJECT:{projectId} with a literally matching action
+        // (ProjectPermission.implies compares action names literally, so "*" does not count).
+        if (!(resourceRoleService.hasAnyProjectRole(currentOrganizationId(), currentUserId(), projectId,
+                Arrays.asList(ResourceRoleName.OWNER, ResourceRoleName.DBA, ResourceRoleName.DEVELOPER,
+                        ResourceRoleName.SECURITY_ADMINISTRATOR))
+                || permissionQueryService.hasActionPermission(ResourceType.ODC_PROJECT, projectId,
+                        Arrays.asList(ResourceRoleName.OWNER.name(), ResourceRoleName.DBA.name(),
+                                ResourceRoleName.SECURITY_ADMINISTRATOR.name())))) {
+            throw new AccessDeniedException();
+        }
         List<ConnectionConfig> connections;
         List<ConnectionEntity> entities = repository.findByDatabaseProjectId(projectId);
         List<Long> environmentIds = entities.stream()
@@ -469,7 +489,7 @@ public class ConnectionService {
                 return c;
             }).collect(Collectors.toList());
         } else {
-            connections = repository.findByDatabaseProjectId(projectId).stream().map(mapper::entityToModel)
+            connections = entities.stream().map(mapper::entityToModel)
                     .collect(Collectors.toList());
         }
         return new PaginatedData<>(connections, CustomPage.empty());
@@ -586,10 +606,10 @@ public class ConnectionService {
         User user = authenticationFacade.currentUser();
         Long userId = user.getId();
         if (params.getRelatedUserId() != null) {
-            Permission requiredPermission =
-                    securityManager.getPermissionByActions(new DefaultSecurityResource(params.getRelatedUserId() + "",
-                            ResourceType.ODC_USER.code()), Collections.singletonList("read"));
-            if (!securityManager.isPermitted(requiredPermission)) {
+            // Check iam_permission directly instead of securityManager.isPermitted, which would load all user
+            // permissions and resource-roles via the authorizers (expensive with thousands of projects).
+            if (!permissionQueryService.hasActionPermission(ResourceType.ODC_USER, params.getRelatedUserId(),
+                    Arrays.asList("read", "*"))) {
                 throw new AccessDeniedException();
             }
             userId = params.getRelatedUserId();
