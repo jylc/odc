@@ -7,7 +7,8 @@ rem
 rem usage: script\build_jar.cmd [extra maven args...]
 rem   extra maven args are passed through to maven, e.g. -Pci -Dskip npm build
 rem
-rem exit code: 0 success, 3 maven build failed, 4 copy artifacts failed
+rem exit code: 0 success, 3 maven build failed, 4 copy artifacts failed,
+rem            5 zip package failed
 rem ===========================================================================
 setlocal EnableExtensions
 
@@ -100,6 +101,30 @@ if exist "%ODC_DIR%\distribution\modules\*.jar" (
 ) else (
     echo [WARN] no module jars found in distribution\modules, skip.
 )
+
+rem ---------------------------------------------------------------------------
+rem package lib/plugins/starters into a versioned zip (name derived from the
+rem executable jar, e.g. odc-server-4.3.4-SNAPSHOT-executable.jar -> odc-4.3.4-SNAPSHOT.zip)
+rem ---------------------------------------------------------------------------
+set "ZIP_BASE="
+for %%F in ("%ODC_DIR%\lib\odc-*-executable.jar") do set "ZIP_BASE=%%~nF"
+if not defined ZIP_BASE (
+    echo [ERROR] no executable jar found in lib, cannot determine version for zip package
+    exit /b 5
+)
+set "ZIP_VERSION=%ZIP_BASE:odc-server-=%"
+set "ZIP_VERSION=%ZIP_VERSION:-executable=%"
+set "ZIP_FILE=%ODC_DIR%\odc-%ZIP_VERSION%.zip"
+echo [INFO] package lib/plugins/starters into %ZIP_FILE% .
+if exist "%ZIP_FILE%" del /f /q "%ZIP_FILE%"
+pushd "%ODC_DIR%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Compress-Archive -Path 'lib','plugins','starters' -DestinationPath '%ZIP_FILE%' -Force"
+if errorlevel 1 (
+    popd
+    echo [ERROR] create zip package failed
+    exit /b 5
+)
+popd
 
 echo [INFO] build jar success
 exit /b 0
