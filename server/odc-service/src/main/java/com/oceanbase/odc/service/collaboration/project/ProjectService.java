@@ -15,6 +15,7 @@
  */
 package com.oceanbase.odc.service.collaboration.project;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -51,6 +52,7 @@ import com.oceanbase.odc.core.shared.PreConditions;
 import com.oceanbase.odc.core.shared.constant.ErrorCodes;
 import com.oceanbase.odc.core.shared.constant.ResourceRoleName;
 import com.oceanbase.odc.core.shared.constant.ResourceType;
+import com.oceanbase.odc.core.shared.exception.AccessDeniedException;
 import com.oceanbase.odc.core.shared.exception.BadRequestException;
 import com.oceanbase.odc.core.shared.exception.NotFoundException;
 import com.oceanbase.odc.core.shared.exception.UnsupportedException;
@@ -82,6 +84,7 @@ import com.oceanbase.odc.service.common.model.InnerUser;
 import com.oceanbase.odc.service.connection.ConnectionService;
 import com.oceanbase.odc.service.flow.FlowInstanceService;
 import com.oceanbase.odc.service.iam.HorizontalDataPermissionValidator;
+import com.oceanbase.odc.service.iam.PermissionQueryService;
 import com.oceanbase.odc.service.iam.ProjectPermissionValidator;
 import com.oceanbase.odc.service.iam.ResourceRoleService;
 import com.oceanbase.odc.service.iam.UserOrganizationService;
@@ -121,6 +124,9 @@ public class ProjectService {
 
     @Autowired
     private ResourceRoleService resourceRoleService;
+
+    @Autowired
+    private PermissionQueryService permissionQueryService;
 
     @Autowired
     private AuthorizationFacade authorizationFacade;
@@ -233,11 +239,21 @@ public class ProjectService {
         return entityToModel(saved, userResourceRoles);
     }
 
-    @PreAuthenticate(hasAnyResourceRole = {"OWNER", "DBA", "DEVELOPER", "SECURITY_ADMINISTRATOR", "PARTICIPANT"},
-            actions = {"OWNER", "DBA", "DEVELOPER", "PARTICIPANT", "SECURITY_ADMINISTRATOR"},
-            resourceType = "ODC_PROJECT", indexOfIdParam = 0)
+    // In-method equivalent of the previous @PreAuthenticate(hasAnyResourceRole/actions) check, which went
+    // through securityManager and loaded ALL user permissions/resource-roles via the authorizers —
+    // extremely expensive when the user belongs to thousands of projects. The five roles here are exactly
+    // ResourceRoleName.all(), so the role branch equals isProjectMember; the iam_permission branch matches
+    // action names literally (ProjectPermission.implies compares literally, so "*" does not count).
+    @SkipAuthorize("permission check inside")
     @Transactional(rollbackFor = Exception.class)
     public Project detail(@NotNull Long id) {
+        if (!(resourceRoleService.isProjectMember(currentOrganizationId(), currentUserId(), id)
+                || permissionQueryService.hasActionPermission(ResourceType.ODC_PROJECT, id, Arrays.asList(
+                        ResourceRoleName.OWNER.name(), ResourceRoleName.DBA.name(),
+                        ResourceRoleName.DEVELOPER.name(), ResourceRoleName.PARTICIPANT.name(),
+                        ResourceRoleName.SECURITY_ADMINISTRATOR.name())))) {
+            throw new AccessDeniedException();
+        }
         ProjectEntity entity = repository.findByIdAndOrganizationId(id, currentOrganizationId())
                 .orElseThrow(() -> new NotFoundException(ResourceType.ODC_PROJECT, "id", id));
         List<UserResourceRole> userResourceRoles =
