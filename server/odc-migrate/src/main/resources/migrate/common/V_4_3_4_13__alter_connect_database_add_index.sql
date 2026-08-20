@@ -17,4 +17,6 @@
 -- Add index on connect_database.project_id to accelerate project-scoped database queries.
 -- Without this index, queries like "WHERE project_id IN (...)" perform full table scans,
 -- which becomes a severe bottleneck when the number of projects (and the IN list) is large.
+-- NOTE: this was originally V_4_3_4_11, which conflicts with the upstream Java migrator
+-- V43411RectifyDetectRuleOfTaskTypeMigrate on version 4.3.4.11, so it is renumbered to 4.3.4.13.
 CREATE INDEX idx_connect_database_project_id ON connect_database (project_id);
