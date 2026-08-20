@@ -63,6 +63,9 @@ public class DatabaseSyncManager {
     @Qualifier("syncDatabaseTaskExecutor")
     private ThreadPoolTaskExecutor executor;
 
+    @Autowired
+    @Qualifier("syncDatasourceTaskExecutor")
+    private ThreadPoolTaskExecutor datasourceExecutor;
     LoadingCache<Long, UserEntity> id2UserEntity = CacheBuilder.newBuilder().maximumSize(100)
             .expireAfterWrite(10, TimeUnit.MINUTES)
             .build(new CacheLoader<Long, UserEntity>() {
@@ -90,6 +93,23 @@ public class DatabaseSyncManager {
             return res;
         }));
     }
+
+    @SkipAuthorize("internal usage")
+    public Future<Boolean> submitCreateConnectionTask(@NonNull Runnable action, @NonNull Long creatorId,
+            @NonNull Long organizationId) {
+        return doExecute(() -> datasourceExecutor.submit(() -> {
+            // pool thread has no security context, create() depends on it for
+            // currentUserId()/currentOrganizationId() and permission checks
+            SecurityContextUtils.setCurrentUser(creatorId, organizationId, getAccountName(creatorId));
+            try {
+                action.run();
+                return true;
+            } finally {
+                SecurityContextUtils.clear();
+            }
+        }));
+    }
+
 
     @SkipAuthorize("internal usage")
     public Boolean syncDBForDataSource(@NonNull ConnectionConfig dataSource) throws InterruptedException {

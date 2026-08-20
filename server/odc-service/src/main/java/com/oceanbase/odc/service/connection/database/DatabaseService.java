@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +52,7 @@ import javax.validation.constraints.Size;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -227,6 +229,10 @@ public class DatabaseService {
 
     @Autowired
     private DBSchemaSyncTaskManager dbSchemaSyncTaskManager;
+
+    @Autowired
+    @Lazy
+    private DatabaseSyncManager databaseSyncManager;
 
     @Autowired
     private DBSchemaSyncProperties dbSchemaSyncProperties;
@@ -766,6 +772,40 @@ public class DatabaseService {
             }
         }
     }
+
+
+    /**
+     * Batch create connections asynchronously on the datasource-sync pool. Returns connection
+     * name to Future, callers should harvest each Future with a timeout to get the result.
+     * Duplicated names within the batch are submitted only once; conflicts with connections
+     * already persisted are detected by the duplicate check inside create() and surface as
+     * ExecutionException from Future.get(), since no unique key exists on
+     * connect_connection(organization_id, name).
+     */
+    @SkipAuthorize("internal usage")
+    public Map<String, Future<Boolean>> batchCreateConnections(@NonNull List<ConnectionConfig> connectionConfigs,
+            @NonNull Long creatorId, @NonNull Long organizationId) {
+        if (CollectionUtils.isEmpty(connectionConfigs)) {
+            return Collections.emptyMap();
+        }
+        Map<String, ConnectionConfig> name2Config = new LinkedHashMap<>();
+        for (ConnectionConfig config : connectionConfigs) {
+            if (config == null || StringUtils.isBlank(config.getName())) {
+                continue;
+            }
+            name2Config.putIfAbsent(config.getName(), config);
+        }
+        Map<String, Future<Boolean>> name2Future = new LinkedHashMap<>();
+        name2Config.forEach((name, config) -> {
+            // an entity carrying an existing id would be merged as an UPDATE by JPA,
+            // null it out to force INSERT semantics
+            config.setId(null);
+            name2Future.put(name, databaseSyncManager.submitCreateConnectionTask(
+                    () -> connectionService.create(config, creatorId, true), creatorId, organizationId));
+        });
+        return name2Future;
+    }
+
 
     private OBConsoleDataSourceFactory getDataSourceFactory(ConnectionConfig connection) {
         OBConsoleDataSourceFactory obConsoleDataSourceFactory =

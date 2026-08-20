@@ -195,6 +195,24 @@ public class ScheduleConfiguration {
         return executor;
     }
 
+
+    @Bean(name = "syncDatasourceTaskExecutor")
+    public ThreadPoolTaskExecutor syncDatasourceTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        int poolSize = Math.max(SystemUtils.availableProcessors() * 8, 64);
+        executor.setCorePoolSize(poolSize);
+        executor.setMaxPoolSize(poolSize);
+        executor.setQueueCapacity(poolSize*4);
+        executor.setThreadNamePrefix("datasource-sync-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(5);
+        executor.setTaskDecorator(new TraceDecorator<>());
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.initialize();
+        log.info("syncDatasourceTaskExecutor initialized");
+        return executor;
+    }
+
     @Bean(name = "scanSensitiveColumnExecutor")
     public ThreadPoolTaskExecutor scanSensitiveColumnExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
