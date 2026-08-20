@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -50,6 +51,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.integration.jdbc.lock.JdbcLockRegistry;
 import org.springframework.stereotype.Service;
@@ -445,7 +447,8 @@ public class ConnectionService {
 
     @Transactional(rollbackFor = Exception.class)
     @SkipAuthorize("permission check inside")
-    public PaginatedData<ConnectionConfig> listByProjectId(@NotNull Long projectId, @NotNull Boolean basic) {
+    public PaginatedData<ConnectionConfig> listByProjectId(@NotNull Long projectId, @NotNull Boolean basic,
+            @NotNull Pageable pageable) {
         // In-method equivalent of the previous @PreAuthenticate(hasAnyResourceRole/actions) check, which went
         // through securityManager and loaded ALL user permissions/resource-roles via the authorizers —
         // extremely expensive when the user belongs to thousands of projects. Semantics preserved as the OR
@@ -461,14 +464,26 @@ public class ConnectionService {
             throw new AccessDeniedException();
         }
         List<ConnectionConfig> connections;
-        List<ConnectionEntity> entities = repository.findByDatabaseProjectId(projectId);
-        List<Long> environmentIds = entities.stream()
+        List<ConnectionEntity> entities = new ArrayList<>(repository.findByDatabaseProjectId(projectId));
+        // the native distinct-join query has no deterministic order, sort by id before paging in memory
+        Comparator<ConnectionEntity> idComparator = Comparator.comparing(ConnectionEntity::getId);
+        Sort.Order idOrder = pageable.getSort().getOrderFor("id");
+        if (idOrder == null || idOrder.isDescending()) {
+            idComparator = idComparator.reversed();
+        }
+        entities.sort(idComparator);
+        int total = entities.size();
+        int from = (int) Math.min(pageable.getOffset(), total);
+        // long arithmetic guards overflow when page size is Integer.MAX_VALUE (controller default)
+        int to = (int) Math.min((long) from + pageable.getPageSize(), total);
+        List<ConnectionEntity> pageEntities = entities.subList(from, to);
+        List<Long> environmentIds = pageEntities.stream()
                 .map(ConnectionEntity::getEnvironmentId)
                 .distinct().collect(Collectors.toList());
         Map<Long, Environment> environmentMap = environmentService.getByIdIn(environmentIds).stream()
                 .collect(Collectors.toMap(Environment::getId, environment -> environment));
         if (basic) {
-            connections = entities.stream().map(e -> {
+            connections = pageEntities.stream().map(e -> {
                 ConnectionConfig c = new ConnectionConfig();
                 Environment environment = environmentMap.getOrDefault(e.getEnvironmentId(), null);
                 if (Objects.isNull(environment)) {
@@ -489,10 +504,11 @@ public class ConnectionService {
                 return c;
             }).collect(Collectors.toList());
         } else {
-            connections = entities.stream().map(mapper::entityToModel)
+            connections = pageEntities.stream().map(mapper::entityToModel)
                     .collect(Collectors.toList());
         }
-        return new PaginatedData<>(connections, CustomPage.empty());
+        Page<ConnectionConfig> page = new PageImpl<>(connections, pageable, total);
+        return new PaginatedData<>(connections, CustomPage.from(page));
     }
 
     @SkipAuthorize("public readonly info")
