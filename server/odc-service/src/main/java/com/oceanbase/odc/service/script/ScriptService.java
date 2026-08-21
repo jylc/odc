@@ -142,7 +142,7 @@ public class ScriptService {
                 .map(scriptMetaMapper::entityToModel);
     }
 
-    public List<ScriptMeta> batchPutScript(List<MultipartFile> files) {
+    public List<ScriptMeta> batchPutScript(List<MultipartFile> files, Long databaseId) {
         String bucketName = ScriptUtils.getPersonalBucketName(authenticationFacade.currentUserIdStr());
         objectStorageFacade.createBucketIfNotExists(bucketName);
         List<ScriptMeta> returnVal = Lists.newArrayList();
@@ -158,7 +158,7 @@ public class ScriptService {
                 ObjectMetadata objectMetadata =
                         objectStorageFacade.putObject(bucketName, file.getOriginalFilename(), file.getSize(),
                                 inputStream);
-                ScriptMeta scriptMeta = saveScriptMeta(objectMetadata, file.getInputStream());
+                ScriptMeta scriptMeta = saveScriptMeta(objectMetadata, file.getInputStream(), databaseId);
                 returnVal.add(scriptMeta);
             } catch (IOException ex) {
                 log.warn("put object failed, cause={}", ex.getMessage());
@@ -232,6 +232,11 @@ public class ScriptService {
         scriptMetaInDb.setUpdateTime(new Date());
         scriptMetaInDb.setCreatorId(objectMetadata.getCreatorId());
         scriptMetaInDb.setContentLength(objectMetadata.getTotalLength());
+        // only overwrite the saved database association when the request carries one,
+        // so saving from a window without database context keeps the original binding
+        if (Objects.nonNull(req.getDatabaseId())) {
+            scriptMetaInDb.setDatabaseId(req.getDatabaseId());
+        }
         // 保存更新后的 script meta
         int affectRows = scriptMetaRepository.saveAndFlushIfObjectIdRetains(scriptMetaInDb, oldObjectId);
         if (affectRows != 1) {
@@ -248,13 +253,14 @@ public class ScriptService {
     }
 
 
-    public ScriptMeta saveScriptMeta(ObjectMetadata objectMetadata, InputStream inputStream) {
+    public ScriptMeta saveScriptMeta(ObjectMetadata objectMetadata, InputStream inputStream, Long databaseId) {
         ScriptMetaEntity entity = ScriptMetaEntity.builder()
                 .objectName(objectMetadata.getObjectName())
                 .objectId(objectMetadata.getObjectId())
                 .creatorId(objectMetadata.getCreatorId())
                 .bucketName(objectMetadata.getBucketName())
                 .contentLength(objectMetadata.getTotalLength())
+                .databaseId(databaseId)
                 .updateTime(new Date())
                 .build();
         String contentAbstract;

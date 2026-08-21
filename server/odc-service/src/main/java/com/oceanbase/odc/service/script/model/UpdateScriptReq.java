@@ -36,4 +36,10 @@ public class UpdateScriptReq {
     private String name;
 
     private String content;
+
+    /**
+     * id of the connect_database record the script is currently attached to; when present
+     * the saved association is overwritten, when absent it stays unchanged
+     */
+    private Long databaseId;
 }

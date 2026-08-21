@@ -35,4 +35,9 @@ public class ScriptMeta {
     private String bucketName;
     private String contentAbstract;
     private long contentLength;
+    /**
+     * id of the connect_database record the script was saved from, used to restore the
+     * datasource/database context when the script is reopened
+     */
+    private Long databaseId;
 }

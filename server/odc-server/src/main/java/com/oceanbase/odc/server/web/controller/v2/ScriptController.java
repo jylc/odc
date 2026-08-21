@@ -78,8 +78,10 @@ public class ScriptController {
     }
 
     @RequestMapping(value = "/scripts/batchUpload", method = RequestMethod.POST)
-    public ListResponse<ScriptMeta> batchUpload(@RequestParam("file") List<MultipartFile> files) {
-        return Responses.list(scriptService.batchPutScript(files));
+    public ListResponse<ScriptMeta> batchUpload(
+            @RequestParam("file") List<MultipartFile> files,
+            @RequestParam(value = "databaseId", required = false) Long databaseId) {
+        return Responses.list(scriptService.batchPutScript(files, databaseId));
     }
 
     @RequestMapping(value = "/scripts/batchGetDownloadUrl", method = RequestMethod.POST)

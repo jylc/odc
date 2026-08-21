@@ -67,6 +67,13 @@ public class ScriptMetaEntity {
     @Column(name = "content_length")
     private Long contentLength;
 
+    /**
+     * id of the connect_database record the script was saved from, used to restore the
+     * datasource/database context when the script is reopened
+     */
+    @Column(name = "database_id")
+    private Long databaseId;
+
     @Column(name = "creator_id", nullable = false)
     private long creatorId;
 }
