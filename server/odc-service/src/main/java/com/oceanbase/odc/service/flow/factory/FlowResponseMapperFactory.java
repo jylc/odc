@@ -373,8 +373,11 @@ public class FlowResponseMapperFactory {
         if (CollectionUtils.isNotEmpty(projectIds)) {
             List<Project> projects = projectService.listByIds(projectIds);
             if (!skipAuth) {
+                // Only load the current user's roles on the target projects; the full
+                // getProjectId2ResourceRoleNames() map is expensive when the user belongs to thousands of
+                // projects.
                 Map<Long, Set<ResourceRoleName>> projectId2ResourceRoleNames =
-                        projectService.getProjectId2ResourceRoleNames();
+                        projectService.getProjectId2ResourceRoleNames(projectIds);
                 projects.forEach(p -> p.setCurrentUserResourceRoles(
                         projectId2ResourceRoleNames.getOrDefault(p.getId(),
                                 Collections.emptySet())));

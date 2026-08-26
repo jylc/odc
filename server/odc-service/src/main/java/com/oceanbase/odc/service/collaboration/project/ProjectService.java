@@ -16,6 +16,7 @@
 package com.oceanbase.odc.service.collaboration.project;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
@@ -576,6 +577,23 @@ public class ProjectService {
                         .collect(Collectors.groupingBy(UserResourceRole::getResourceId,
                                 Collectors.mapping(UserResourceRole::getResourceRole, Collectors.toSet())));
         return projectId2Members;
+    }
+
+    /**
+     * Scope-limited variant of {@link #getProjectId2ResourceRoleNames(Long, Long)}: only loads the current
+     * user's roles on the given {@code projectIds} instead of on every project it belongs to, which is
+     * expensive when the user belongs to thousands of projects.
+     */
+    @SkipAuthorize("odc internal usage")
+    public Map<Long, Set<ResourceRoleName>> getProjectId2ResourceRoleNames(@NonNull Collection<Long> projectIds) {
+        if (projectIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<UserResourceRole> userResourceRoles = resourceRoleService
+                .listByOrganizationIdAndUserIdAndResourceIds(currentOrganizationId(), currentUserId(), projectIds);
+        return userResourceRoles.stream().filter(UserResourceRole::isProjectMember)
+                .collect(Collectors.groupingBy(UserResourceRole::getResourceId,
+                        Collectors.mapping(UserResourceRole::getResourceRole, Collectors.toSet())));
     }
 
     /**

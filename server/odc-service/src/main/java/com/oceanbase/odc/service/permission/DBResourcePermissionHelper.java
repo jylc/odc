@@ -57,6 +57,7 @@ import com.oceanbase.odc.service.collaboration.project.ProjectService;
 import com.oceanbase.odc.service.connection.database.model.DBResource;
 import com.oceanbase.odc.service.connection.database.model.UnauthorizedDBResource;
 import com.oceanbase.odc.service.connection.model.ConnectionConfig;
+import com.oceanbase.odc.service.iam.ResourceRoleService;
 import com.oceanbase.odc.service.iam.auth.AuthenticationFacade;
 import com.oceanbase.odc.service.permission.common.PermissionCheckWhitelist;
 import com.oceanbase.odc.service.permission.database.model.DatabasePermissionType;
@@ -74,6 +75,9 @@ public class DBResourcePermissionHelper {
 
     @Autowired
     private ProjectService projectService;
+
+    @Autowired
+    private ResourceRoleService resourceRoleService;
 
     @Autowired
     private AuthenticationFacade authenticationFacade;
@@ -125,14 +129,14 @@ public class DBResourcePermissionHelper {
         Map<Long, ConnectionEntity> id2Entity = this.connectionConfigRepository.findByIdIn(connectionIds)
                 .stream().collect(Collectors.toMap(ConnectionEntity::getId, e -> e));
         List<Long> toCheckDatabaseIds = new ArrayList<>();
-        Set<Long> projectIds = getPermittedProjectIds();
+        Map<Long, Boolean> projectId2Permitted = new HashMap<>();
         for (DatabaseEntity e : entities) {
             if (e.getProjectId() == null) {
                 throw new AccessDeniedException("Database is not belong to any project");
             }
             DialectType dialectType = id2Entity.get(e.getConnectionId()).getDialectType();
             if (permissionCheckWhitelist.containsDatabase(e.getName(), dialectType)
-                    || projectIds.contains(e.getProjectId())) {
+                    || isProjectPermitted(e.getProjectId(), projectId2Permitted)) {
                 continue;
             }
             toCheckDatabaseIds.add(e.getId());
@@ -170,12 +174,12 @@ public class DBResourcePermissionHelper {
             return ret;
         }
         List<DatabaseEntity> entities = databaseRepository.findByIdIn(databaseIds);
-        Set<Long> projectIds = getPermittedProjectIds();
+        Map<Long, Boolean> projectId2Permitted = new HashMap<>();
         Map<Long, Set<DatabasePermissionType>> id2PermissionTypes = getInnerDBPermissionTypes(databaseIds);
         for (DatabaseEntity e : entities) {
             if (e.getProjectId() == null) {
                 ret.put(e.getId(), new HashSet<>());
-            } else if (projectIds.contains(e.getProjectId())) {
+            } else if (isProjectPermitted(e.getProjectId(), projectId2Permitted)) {
                 ret.put(e.getId(), new HashSet<>(DatabasePermissionType.all()));
             } else {
                 if (id2PermissionTypes.containsKey(e.getId())) {
@@ -209,7 +213,7 @@ public class DBResourcePermissionHelper {
         Set<Long> dbIds = tbEntities.stream().map(DBObjectEntity::getDatabaseId).collect(Collectors.toSet());
         Map<Long, DatabaseEntity> dbId2Entity = databaseRepository.findByIdIn(dbIds).stream()
                 .collect(Collectors.toMap(DatabaseEntity::getId, e -> e));
-        Set<Long> projectIds = getPermittedProjectIds();
+        Map<Long, Boolean> projectId2Permitted = new HashMap<>();
         Map<Long, List<UserDatabasePermissionEntity>> dbId2Permissions = userDatabasePermissionRepository
                 .findNotExpiredByUserIdAndDatabaseIdIn(authenticationFacade.currentUserId(), dbIds)
                 .stream().collect(Collectors.groupingBy(UserDatabasePermissionEntity::getDatabaseId));
@@ -220,7 +224,7 @@ public class DBResourcePermissionHelper {
             if (!dbId2Entity.containsKey(e.getDatabaseId())
                     || dbId2Entity.get(e.getDatabaseId()).getProjectId() == null) {
                 ret.put(e.getId(), new HashSet<>());
-            } else if (projectIds.contains(dbId2Entity.get(e.getDatabaseId()).getProjectId())) {
+            } else if (isProjectPermitted(dbId2Entity.get(e.getDatabaseId()).getProjectId(), projectId2Permitted)) {
                 ret.put(e.getId(), new HashSet<>(DatabasePermissionType.all()));
             } else {
                 Set<DatabasePermissionType> authorized = new HashSet<>();
@@ -444,14 +448,18 @@ public class DBResourcePermissionHelper {
         return resource2PermissionTypes;
     }
 
-    private Set<Long> getPermittedProjectIds() {
-        // OWNER, DBA or DEVELOPER can access all databases inner the project
-        Map<Long, Set<ResourceRoleName>> projectIds2Roles = projectService.getProjectId2ResourceRoleNames();
-        return projectIds2Roles.entrySet().stream()
-                .filter(e -> e.getValue().contains(ResourceRoleName.OWNER)
-                        || e.getValue().contains(ResourceRoleName.DBA)
-                        || e.getValue().contains(ResourceRoleName.DEVELOPER))
-                .map(Map.Entry::getKey).collect(Collectors.toSet());
+    /**
+     * Equivalent to the previous {@code getPermittedProjectIds().contains(projectId)}, which loaded the
+     * user's roles on every project it belongs to - expensive when the user belongs to thousands of
+     * projects. Uses the precise single-project check instead, memoized per call so each distinct project
+     * is queried at most once.
+     */
+    private boolean isProjectPermitted(Long projectId, Map<Long, Boolean> projectId2Permitted) {
+        return projectId2Permitted.computeIfAbsent(projectId,
+                id -> resourceRoleService.hasAnyProjectRole(authenticationFacade.currentOrganizationId(),
+                        authenticationFacade.currentUserId(), id,
+                        Arrays.asList(ResourceRoleName.OWNER, ResourceRoleName.DBA,
+                                ResourceRoleName.DEVELOPER)));
     }
 
     private Map<Long, Set<DatabasePermissionType>> getInnerDBPermissionTypes(Collection<Long> databaseIds) {

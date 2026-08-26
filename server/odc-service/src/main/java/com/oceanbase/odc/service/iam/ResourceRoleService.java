@@ -293,6 +293,36 @@ public class ResourceRoleService {
     }
 
     /**
+     * Scope-limited variant of {@link #listByOrganizationIdAndUserId(Long, Long)}: only loads the user's
+     * resource roles on the given {@code resourceIds} instead of on every project of the organization.
+     * Equivalent to filtering {@code listByOrganizationIdAndUserId} by resource id, but avoids the full
+     * {@code iam_user_resource_role} scan and the organization-wide project materialization for global
+     * roles, both of which are expensive when the user belongs to thousands of projects.
+     */
+    @SkipAuthorize("odc internal usage")
+    public List<UserResourceRole> listByOrganizationIdAndUserIdAndResourceIds(@NonNull Long organizationId,
+            @NonNull Long userId, @NonNull Collection<Long> resourceIds) {
+        if (resourceIds.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<UserResourceRole> userResourceRoles = fromEntities(
+                userResourceRoleRepository.findByOrganizationIdAndUserIdAndResourceTypeAndResourceIdIn(
+                        organizationId, userId, ResourceType.ODC_PROJECT, resourceIds));
+        List<UserGlobalResourceRole> globalResourceRoles =
+                globalResourceRoleService.findGlobalResourceRoleUsersByOrganizationIdAndUserId(organizationId, userId);
+        if (CollectionUtils.isEmpty(globalResourceRoles)) {
+            return userResourceRoles;
+        }
+        Map<ResourceRoleName, Long> resourceRoleName2Id = getProjectResourceRoleName2Id();
+        resourceIds.stream().filter(Objects::nonNull)
+                .forEach(resourceId -> globalResourceRoles.stream()
+                        .map(i -> new UserResourceRole(i.getUserId(), resourceId, ResourceType.ODC_PROJECT,
+                                i.getResourceRole(), resourceRoleName2Id.get(i.getResourceRole()), true))
+                        .forEach(userResourceRoles::add));
+        return userResourceRoles;
+    }
+
+    /**
      * Equivalent to {@code getProjectId2ResourceRoleNames(organizationId, userId).containsKey(projectId)} but
      * avoids loading all project roles of the user, which is expensive when the user belongs to thousands of
      * projects. Membership holds when the user has a direct {@code ODC_PROJECT} resource role on the target
