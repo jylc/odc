@@ -19,6 +19,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.function.Function;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -34,6 +35,17 @@ import com.oceanbase.tools.dbbrowser.util.DBSchemaAccessorUtil;
  * @date 2024/3/27 17:55
  */
 public interface DBObjectRepository extends OdcJpaRepository<DBObjectEntity, Long> {
+
+    /**
+     * List-returning variant of {@code findAll(Specification, Pageable)} for the fixed predicate
+     * "databaseId in ? and name like ? and type in ?": applies the pageable limit but skips Spring
+     * Data's implicit count(*) query, which scans the same wide IN + leading-wildcard LIKE range and
+     * whose result is never consumed.
+     */
+    @Query("select o from DBObjectEntity o where o.databaseId in :databaseIds and o.name like :nameLike "
+            + "and o.type in :types")
+    List<DBObjectEntity> findByDatabaseIdInAndNameLikeAndTypeIn(@Param("databaseIds") Collection<Long> databaseIds,
+            @Param("nameLike") String nameLike, @Param("types") Collection<DBObjectType> types, Pageable pageable);
 
     List<DBObjectEntity> findByIdIn(Collection<Long> ids);
 

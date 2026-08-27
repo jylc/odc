@@ -32,6 +32,7 @@ import com.oceanbase.odc.core.authority.permission.ProjectPermission;
 import com.oceanbase.odc.core.authority.permission.ResourceRoleBasedPermission;
 import com.oceanbase.odc.core.authority.util.SkipAuthorize;
 import com.oceanbase.odc.core.shared.constant.ResourceRoleName;
+import com.oceanbase.odc.core.shared.constant.ResourceType;
 import com.oceanbase.odc.core.shared.exception.AccessDeniedException;
 import com.oceanbase.odc.service.iam.auth.AuthenticationFacade;
 import com.oceanbase.odc.service.iam.auth.AuthorizationFacade;
@@ -51,6 +52,12 @@ public class ProjectPermissionValidator {
     @Autowired
     private AuthorizationFacade authorizationFacade;
 
+    @Autowired
+    private ResourceRoleService resourceRoleService;
+
+    @Autowired
+    private PermissionQueryService permissionQueryService;
+
     @SkipAuthorize("internal usage only")
     public void checkProjectRole(@NonNull Long projectId, @NonNull List<ResourceRoleName> roleNames) {
         if (!hasProjectRole(projectId, roleNames)) {
@@ -63,6 +70,29 @@ public class ProjectPermissionValidator {
         if (!hasProjectRole(projectIds, roleNames)) {
             throw new AccessDeniedException();
         }
+    }
+
+    @SkipAuthorize("internal usage only")
+    public void checkProjectMember(@NonNull Long projectId) {
+        if (!isProjectMember(projectId)) {
+            throw new AccessDeniedException();
+        }
+    }
+
+    /**
+     * In-method equivalent of {@code hasProjectRole(projectId, ResourceRoleName.all())}, which goes through
+     * securityManager and loads ALL user permissions and resource-roles via the authorizers - extremely
+     * expensive when the user belongs to thousands of projects. The role set here is exactly
+     * ResourceRoleName.all(), so the resource-role branch equals isProjectMember; the iam_permission branch
+     * matches action names literally (ProjectPermission.implies compares literally, so "*" does not count).
+     * ComposedPermission.implies is any-match, so OR-ing the two branches is equivalent.
+     */
+    @SkipAuthorize("internal usage only")
+    public boolean isProjectMember(@NonNull Long projectId) {
+        return resourceRoleService.isProjectMember(authenticationFacade.currentOrganizationId(),
+                authenticationFacade.currentUserId(), projectId)
+                || permissionQueryService.hasActionPermission(ResourceType.ODC_PROJECT, projectId,
+                        ResourceRoleName.all().stream().map(ResourceRoleName::name).collect(Collectors.toList()));
     }
 
     @SkipAuthorize("internal usage only")

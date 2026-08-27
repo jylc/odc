@@ -33,9 +33,7 @@ import com.oceanbase.odc.core.shared.exception.AccessDeniedException;
 import com.oceanbase.odc.metadb.flow.UserTaskInstanceEntity;
 import com.oceanbase.odc.service.flow.instance.FlowInstance;
 import com.oceanbase.odc.service.iam.HorizontalDataPermissionValidator;
-import com.oceanbase.odc.service.iam.PermissionQueryService;
 import com.oceanbase.odc.service.iam.ProjectPermissionValidator;
-import com.oceanbase.odc.service.iam.ResourceRoleService;
 import com.oceanbase.odc.service.iam.auth.AuthenticationFacade;
 
 /**
@@ -49,12 +47,6 @@ public class FlowPermissionHelper {
     private ProjectPermissionValidator projectPermissionValidator;
 
     @Autowired
-    private ResourceRoleService resourceRoleService;
-
-    @Autowired
-    private PermissionQueryService permissionQueryService;
-
-    @Autowired
     private ApprovalPermissionService approvalPermissionService;
 
     @Autowired
@@ -66,23 +58,8 @@ public class FlowPermissionHelper {
 
     public Consumer<FlowInstance> withProjectMemberCheck() {
         return withProjectPermissionCheck(
-                flowInstance -> flowInstance.getProjectId() != null && isProjectMember(flowInstance.getProjectId()));
-    }
-
-    /**
-     * In-method equivalent of {@code projectPermissionValidator.hasProjectRole(projectId,
-     * ResourceRoleName.all())}, which goes through securityManager and loads ALL user permissions and
-     * resource-roles via the authorizers - extremely expensive when the user belongs to thousands of
-     * projects. The role set here is exactly ResourceRoleName.all(), so the resource-role branch equals
-     * isProjectMember; the iam_permission branch matches action names literally (ProjectPermission.implies
-     * compares literally, so "*" does not count). ComposedPermission.implies is any-match, so OR-ing the
-     * two branches is equivalent.
-     */
-    private boolean isProjectMember(Long projectId) {
-        return resourceRoleService.isProjectMember(authenticationFacade.currentOrganizationId(),
-                authenticationFacade.currentUserId(), projectId)
-                || permissionQueryService.hasActionPermission(ResourceType.ODC_PROJECT, projectId,
-                        ResourceRoleName.all().stream().map(ResourceRoleName::name).collect(Collectors.toList()));
+                flowInstance -> flowInstance.getProjectId() != null
+                        && projectPermissionValidator.isProjectMember(flowInstance.getProjectId()));
     }
 
     public Consumer<FlowInstance> withProjectOwnerOrDBACheck() {

@@ -16,6 +16,7 @@
 package com.oceanbase.odc.service.db.schema;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -30,23 +31,18 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.validation.annotation.Validated;
 
 import com.google.common.collect.Ordering;
-import com.oceanbase.odc.common.jpa.SpecificationUtil;
 import com.oceanbase.odc.common.util.StringUtils;
 import com.oceanbase.odc.core.authority.util.SkipAuthorize;
 import com.oceanbase.odc.core.shared.constant.OrganizationType;
-import com.oceanbase.odc.core.shared.constant.ResourceRoleName;
 import com.oceanbase.odc.core.shared.constant.ResourceType;
 import com.oceanbase.odc.core.shared.exception.NotFoundException;
 import com.oceanbase.odc.metadb.dbobject.DBColumnEntity;
-import com.oceanbase.odc.metadb.dbobject.DBColumnEntity_;
 import com.oceanbase.odc.metadb.dbobject.DBColumnRepository;
 import com.oceanbase.odc.metadb.dbobject.DBObjectEntity;
-import com.oceanbase.odc.metadb.dbobject.DBObjectEntity_;
 import com.oceanbase.odc.metadb.dbobject.DBObjectRepository;
 import com.oceanbase.odc.service.collaboration.project.ProjectService;
 import com.oceanbase.odc.service.connection.ConnectionService;
@@ -107,7 +103,7 @@ public class DBSchemaIndexService {
             throw new IllegalArgumentException("projectId and datasourceId cannot be set at the same time");
         }
         if (params.getProjectId() != null) {
-            projectPermissionValidator.checkProjectRole(params.getProjectId(), ResourceRoleName.all());
+            projectPermissionValidator.checkProjectMember(params.getProjectId());
             if (CollectionUtils.isNotEmpty(params.getDatabaseIds())) {
                 List<Database> databases = databaseService.listDatabasesByIds(params.getDatabaseIds());
                 databases.forEach(e -> {
@@ -166,11 +162,10 @@ public class DBSchemaIndexService {
             resp.setDatabases(ordering.leastOf(matches, MAX_RETURN_SIZE_PER_TYPE));
         }
         Pageable pageable = PageRequest.of(0, MAX_SEARCH_SIZE);
+        String nameLike = "%" + StringUtils.escapeLike(searchKey) + "%";
         if (CollectionUtils.isEmpty(params.getTypes()) || params.getTypes().contains(DBObjectType.COLUMN)) {
-            Specification<DBColumnEntity> columnSpec =
-                    SpecificationUtil.columnIn(DBColumnEntity_.DATABASE_ID, queryDatabaseIds);
-            columnSpec = columnSpec.and(SpecificationUtil.columnLike(DBColumnEntity_.NAME, searchKey));
-            List<DBColumnEntity> matches = dbColumnRepository.findAll(columnSpec, pageable).getContent();
+            List<DBColumnEntity> matches =
+                    dbColumnRepository.findByDatabaseIdInAndNameLike(queryDatabaseIds, nameLike, pageable);
             Ordering<DBColumnEntity> ordering = Ordering.natural().onResultOf(e -> e.getName().length());
             ordering = ordering.compound(Ordering.natural().onResultOf(DBColumnEntity::getName));
             matches = ordering.leastOf(matches, MAX_RETURN_SIZE_PER_TYPE);
@@ -180,13 +175,12 @@ public class DBSchemaIndexService {
                             .collect(Collectors.toMap(OdcDBObject::getId, e -> e, (e1, e2) -> e1));
             resp.setDbColumns(columnEntitiesToModels(matches, id2Object));
         }
-        Specification<DBObjectEntity> objectSpec =
-                SpecificationUtil.columnIn(DBObjectEntity_.DATABASE_ID, queryDatabaseIds);
-        objectSpec = objectSpec.and(SpecificationUtil.columnLike(DBObjectEntity_.NAME, searchKey));
-        if (CollectionUtils.isNotEmpty(params.getTypes())) {
-            objectSpec = objectSpec.and(SpecificationUtil.columnIn(DBObjectEntity_.TYPE, params.getTypes()));
-        }
-        List<DBObjectEntity> matches = dbObjectRepository.findAll(objectSpec, pageable).getContent();
+        // An empty type filter degenerates to "type in all enum values", equivalent to no filter.
+        List<DBObjectType> types = CollectionUtils.isEmpty(params.getTypes())
+                ? Arrays.asList(DBObjectType.values())
+                : params.getTypes();
+        List<DBObjectEntity> matches =
+                dbObjectRepository.findByDatabaseIdInAndNameLikeAndTypeIn(queryDatabaseIds, nameLike, types, pageable);
         Map<DBObjectType, List<DBObjectEntity>> type2Objects =
                 matches.stream().collect(Collectors.groupingBy(DBObjectEntity::getType));
         Ordering<DBObjectEntity> ordering = Ordering.natural().onResultOf(e -> e.getName().length());
@@ -242,7 +236,7 @@ public class DBSchemaIndexService {
                         .collect(Collectors.toSet()));
             }
         } else if (req.getResourceType() == ResourceType.ODC_PROJECT) {
-            projectPermissionValidator.checkProjectRole(req.getResourceId(), ResourceRoleName.all());
+            projectPermissionValidator.checkProjectMember(req.getResourceId());
             databases.addAll(databaseService.listExistDatabasesByProjectId(req.getResourceId()));
         } else if (req.getResourceType() == ResourceType.ODC_DATABASE) {
             List<Database> dbs = databaseService.listDatabasesByIds(Collections.singleton(req.getResourceId()));
