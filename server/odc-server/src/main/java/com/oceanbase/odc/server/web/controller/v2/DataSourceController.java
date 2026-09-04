@@ -139,7 +139,8 @@ public class DataSourceController {
             @RequestParam(required = false, name = "name") String name,
             @PageableDefault(size = Integer.MAX_VALUE, sort = {"id"}, direction = Direction.DESC) Pageable pageable) {
         if (Objects.nonNull(projectId)) {
-            return Responses.paginated(connectionService.listByProjectId(projectId, basic, pageable));
+            return Responses.paginated(
+                    connectionService.listByProjectId(projectId, basic, pageable, fuzzySearchKeyword));
         }
         Boolean enabled = CollectionUtils.size(enabledList) == 1 ? enabledList.get(0) : null;
         QueryConnectionParams params = QueryConnectionParams.builder()

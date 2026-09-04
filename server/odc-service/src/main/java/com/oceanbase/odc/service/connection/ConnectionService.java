@@ -449,6 +449,13 @@ public class ConnectionService {
     @SkipAuthorize("permission check inside")
     public PaginatedData<ConnectionConfig> listByProjectId(@NotNull Long projectId, @NotNull Boolean basic,
             @NotNull Pageable pageable) {
+        return listByProjectId(projectId, basic, pageable, null);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    @SkipAuthorize("permission check inside")
+    public PaginatedData<ConnectionConfig> listByProjectId(@NotNull Long projectId, @NotNull Boolean basic,
+            @NotNull Pageable pageable, String fuzzySearchKeyword) {
         // In-method equivalent of the previous @PreAuthenticate(hasAnyResourceRole/actions) check, which went
         // through securityManager and loaded ALL user permissions/resource-roles via the authorizers —
         // extremely expensive when the user belongs to thousands of projects. Semantics preserved as the OR
@@ -465,6 +472,20 @@ public class ConnectionService {
         }
         List<ConnectionConfig> connections;
         List<ConnectionEntity> entities = new ArrayList<>(repository.findByDatabaseProjectId(projectId));
+        if (StringUtils.isNotBlank(fuzzySearchKeyword)) {
+            // In-memory fuzzy filter before paging, mirroring innerList()'s fuzzy semantics
+            // (name/host/port/clusterName/tenantName/id contains, case-insensitive). Without this
+            // the keyword is silently dropped for project-scoped queries and the frontend can only
+            // match datasources on the currently loaded page.
+            String kw = fuzzySearchKeyword.toLowerCase();
+            entities = entities.stream().filter(e -> containsIgnoreCase(e.getName(), kw)
+                    || containsIgnoreCase(e.getHost(), kw)
+                    || containsIgnoreCase(String.valueOf(e.getPort()), kw)
+                    || containsIgnoreCase(e.getClusterName(), kw)
+                    || containsIgnoreCase(e.getTenantName(), kw)
+                    || containsIgnoreCase(String.valueOf(e.getId()), kw))
+                    .collect(Collectors.toList());
+        }
         // the native distinct-join query has no deterministic order, sort by id before paging in memory
         Comparator<ConnectionEntity> idComparator = Comparator.comparing(ConnectionEntity::getId);
         Sort.Order idOrder = pageable.getSort().getOrderFor("id");
@@ -509,6 +530,10 @@ public class ConnectionService {
         }
         Page<ConnectionConfig> page = new PageImpl<>(connections, pageable, total);
         return new PaginatedData<>(connections, CustomPage.from(page));
+    }
+
+    private static boolean containsIgnoreCase(String value, String lowerKeyword) {
+        return value != null && value.toLowerCase().contains(lowerKeyword);
     }
 
     @SkipAuthorize("public readonly info")
