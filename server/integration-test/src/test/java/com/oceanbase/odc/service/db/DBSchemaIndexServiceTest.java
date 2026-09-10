@@ -123,10 +123,9 @@ public class DBSchemaIndexServiceTest extends ServiceTestEnv {
             createDBObjectEntity(1, database.getId(), DBObjectType.SYNONYM);
         }
         // Mock all not related service beans
-        Mockito.doNothing().when(projectPermissionValidator).checkProjectRole(Mockito.eq(VALID_PROJECT_ID),
-                Mockito.anyList());
+        Mockito.doNothing().when(projectPermissionValidator).checkProjectMember(Mockito.eq(VALID_PROJECT_ID));
         Mockito.doThrow(AccessDeniedException.class).when(projectPermissionValidator)
-                .checkProjectRole(Mockito.eq(INVALID_PROJECT_ID), Mockito.anyList());
+                .checkProjectMember(Mockito.eq(INVALID_PROJECT_ID));
         Mockito.when(projectService.getMemberProjectIds(USER_ID))
                 .thenReturn(new HashSet<>(Arrays.asList(VALID_PROJECT_ID)));
         Mockito.when(projectService.mapByIdIn(Mockito.anySet())).thenReturn(getProjectMap());
