@@ -150,30 +150,33 @@ public class DBSchemaIndexService {
         if (CollectionUtils.isEmpty(queryDatabaseIds)) {
             return resp;
         }
-        List<Database> databases = databaseService.listDatabasesDetailsByIds(queryDatabaseIds);
-        Map<Long, Database> id2Database =
-                databases.stream().collect(Collectors.toMap(Database::getId, e -> e, (e1, e2) -> e1));
+        // Light models suffice for name matching; detail assembly (permissions, owners, datasource,
+        // environment) is deferred to the databases actually referenced by the response, instead of
+        // enriching every database in the query scope.
+        List<Database> databases = databaseService.listDatabasesByIds(queryDatabaseIds);
+        Pageable pageable = PageRequest.of(0, MAX_SEARCH_SIZE);
+        String nameLike = "%" + StringUtils.escapeLike(searchKey) + "%";
+        List<Database> schemaMatches = Collections.emptyList();
         if (CollectionUtils.isEmpty(params.getTypes()) || params.getTypes().contains(DBObjectType.SCHEMA)) {
             String key = searchKey.toLowerCase();
             List<Database> matches = databases.stream().filter(e -> e.getName().toLowerCase().contains(key))
                     .collect(Collectors.toList());
             Ordering<Database> ordering = Ordering.natural().onResultOf(e -> e.getName().length());
             ordering = ordering.compound(Ordering.natural().onResultOf(Database::getName));
-            resp.setDatabases(ordering.leastOf(matches, MAX_RETURN_SIZE_PER_TYPE));
+            schemaMatches = ordering.leastOf(matches, MAX_RETURN_SIZE_PER_TYPE);
         }
-        Pageable pageable = PageRequest.of(0, MAX_SEARCH_SIZE);
-        String nameLike = "%" + StringUtils.escapeLike(searchKey) + "%";
+        List<DBColumnEntity> columnMatches = Collections.emptyList();
+        List<DBObjectEntity> columnObjectEntities = Collections.emptyList();
         if (CollectionUtils.isEmpty(params.getTypes()) || params.getTypes().contains(DBObjectType.COLUMN)) {
-            List<DBColumnEntity> matches =
-                    dbColumnRepository.findByDatabaseIdInAndNameLike(queryDatabaseIds, nameLike, pageable);
+            columnMatches = dbColumnRepository.findByDatabaseIdInAndNameLike(queryDatabaseIds, nameLike, pageable);
             Ordering<DBColumnEntity> ordering = Ordering.natural().onResultOf(e -> e.getName().length());
             ordering = ordering.compound(Ordering.natural().onResultOf(DBColumnEntity::getName));
-            matches = ordering.leastOf(matches, MAX_RETURN_SIZE_PER_TYPE);
-            Set<Long> objectIds = matches.stream().map(DBColumnEntity::getObjectId).collect(Collectors.toSet());
-            Map<Long, OdcDBObject> id2Object =
-                    objectEntitiesToModels(dbObjectRepository.findByIdIn(objectIds), id2Database).stream()
-                            .collect(Collectors.toMap(OdcDBObject::getId, e -> e, (e1, e2) -> e1));
-            resp.setDbColumns(columnEntitiesToModels(matches, id2Object));
+            columnMatches = ordering.leastOf(columnMatches, MAX_RETURN_SIZE_PER_TYPE);
+            Set<Long> objectIds = columnMatches.stream().map(DBColumnEntity::getObjectId)
+                    .collect(Collectors.toSet());
+            if (CollectionUtils.isNotEmpty(objectIds)) {
+                columnObjectEntities = dbObjectRepository.findByIdIn(objectIds);
+            }
         }
         // An empty type filter degenerates to "type in all enum values", equivalent to no filter.
         List<DBObjectType> types = CollectionUtils.isEmpty(params.getTypes())
@@ -189,6 +192,20 @@ public class DBSchemaIndexService {
         for (Map.Entry<DBObjectType, List<DBObjectEntity>> entry : type2Objects.entrySet()) {
             filtered.addAll(ordering.leastOf(entry.getValue(), MAX_RETURN_SIZE_PER_TYPE));
         }
+        Set<Long> detailDatabaseIds = new HashSet<>();
+        schemaMatches.forEach(e -> detailDatabaseIds.add(e.getId()));
+        columnObjectEntities.forEach(e -> detailDatabaseIds.add(e.getDatabaseId()));
+        filtered.forEach(e -> detailDatabaseIds.add(e.getDatabaseId()));
+        Map<Long, Database> id2Database = detailDatabaseIds.isEmpty()
+                ? Collections.emptyMap()
+                : databaseService.listDatabasesDetailsByIds(detailDatabaseIds).stream()
+                        .collect(Collectors.toMap(Database::getId, e -> e, (e1, e2) -> e1));
+        resp.setDatabases(schemaMatches.stream().map(e -> id2Database.getOrDefault(e.getId(), e))
+                .collect(Collectors.toList()));
+        Map<Long, OdcDBObject> id2Object =
+                objectEntitiesToModels(columnObjectEntities, id2Database).stream()
+                        .collect(Collectors.toMap(OdcDBObject::getId, e -> e, (e1, e2) -> e1));
+        resp.setDbColumns(columnEntitiesToModels(columnMatches, id2Object));
         resp.setDbObjects(objectEntitiesToModels(filtered, id2Database));
         return resp;
     }
