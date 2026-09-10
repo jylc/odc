@@ -106,7 +106,24 @@ public class OBMySQLSchemaAccessor extends MySQLNoLessThan5700SchemaAccessor {
     @Override
     public List<DBObjectIdentity> listTables(String schemaName, String tableNameLike) {
         List<DBObjectIdentity> results = super.listTables(schemaName, tableNameLike);
+        appendSystemBaseTables(results, schemaName, tableNameLike);
+        return results;
+    }
 
+    /**
+     * Combined {@code information_schema.tables} scan from the MySQL base accessor plus the same
+     * oceanbase/mysql system-table supplements as {@link #listTables(String, String)}, keeping the
+     * merged path semantically identical to the two separate calls it replaces.
+     */
+    @Override
+    public List<DBObjectIdentity> listTablesAndViews(String schemaName, String nameLike) {
+        List<DBObjectIdentity> results = super.listTablesAndViews(schemaName, nameLike);
+        appendSystemBaseTables(results, schemaName, nameLike);
+        return results;
+    }
+
+    private void appendSystemBaseTables(List<DBObjectIdentity> results, String schemaName,
+            String tableNameLike) {
         if (StringUtils.isBlank(schemaName) || "oceanbase".equals(schemaName)) {
             MySQLSqlBuilder querySystemTable = new MySQLSqlBuilder();
             querySystemTable.append("show full tables from oceanbase where Table_type='BASE TABLE'");
@@ -135,7 +152,6 @@ public class OBMySQLSchemaAccessor extends MySQLNoLessThan5700SchemaAccessor {
                 log.warn("List base tables from 'mysql' failed, reason={}", e.getMessage());
             }
         }
-        return results;
     }
 
     @Override

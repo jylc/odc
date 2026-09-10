@@ -221,6 +221,29 @@ public class MySQLNoLessThan5700SchemaAccessor implements DBSchemaAccessor {
         return listBaseTables(schemaName, tableNameLike);
     }
 
+    /**
+     * Single scan of information_schema.tables covering both BASE TABLE and VIEW rows, instead of one
+     * full scan in {@link #listTables(String, String)} plus another in {@link #listAllUserViews()}.
+     * SYSTEM VIEW rows are excluded on purpose to keep semantics identical to the two separate queries.
+     */
+    @Override
+    public List<DBObjectIdentity> listTablesAndViews(String schemaName, String nameLike) {
+        MySQLSqlBuilder sb = new MySQLSqlBuilder();
+        sb.append("select table_schema as schema_name, ");
+        sb.append("case when table_type = 'VIEW' then 'VIEW' else 'TABLE' end as type, ");
+        sb.append("table_name as name ");
+        sb.append("from information_schema.tables where table_type in ('BASE TABLE', 'VIEW')");
+        if (StringUtils.isNotBlank(schemaName)) {
+            sb.append(" AND table_schema=").value(schemaName);
+        }
+        if (StringUtils.isNotBlank(nameLike)) {
+            sb.append(" AND table_name LIKE ");
+            sb.value(nameLike);
+        }
+        sb.append(" ORDER BY schema_name, name");
+        return jdbcOperations.query(sb.toString(), new BeanPropertyRowMapper<>(DBObjectIdentity.class));
+    }
+
     protected List<DBObjectIdentity> listBaseTables(String schemaName, String tableNameLike)
             throws DataAccessException {
         MySQLSqlBuilder sb = new MySQLSqlBuilder();

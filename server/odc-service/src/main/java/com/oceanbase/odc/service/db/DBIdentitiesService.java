@@ -41,11 +41,21 @@ public class DBIdentitiesService {
         }
         DBSchemaAccessor schemaAccessor = DBSchemaAccessors.create(session);
         Map<String, SchemaIdentities> all = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
-        if (types.contains(DBObjectType.VIEW)) {
-            listViews(schemaAccessor, all);
-        }
-        if (types.contains(DBObjectType.TABLE)) {
-            listTables(schemaAccessor, all);
+        if (types.contains(DBObjectType.TABLE) && types.contains(DBObjectType.VIEW)) {
+            // Both types are always listed cross-schema here; the merged query scans
+            // information_schema.tables once instead of once per type, which dominates the latency
+            // of this API on large tenants. System views stay on their cheap separate queries.
+            schemaAccessor.listTablesAndViews(null, null)
+                    .forEach(i -> all.computeIfAbsent(i.getSchemaName(), SchemaIdentities::of).add(i));
+            schemaAccessor.listAllSystemViews()
+                    .forEach(i -> all.computeIfAbsent(i.getSchemaName(), SchemaIdentities::of).add(i));
+        } else {
+            if (types.contains(DBObjectType.VIEW)) {
+                listViews(schemaAccessor, all);
+            }
+            if (types.contains(DBObjectType.TABLE)) {
+                listTables(schemaAccessor, all);
+            }
         }
         schemaAccessor.showDatabases().forEach(db -> all.computeIfAbsent(db, SchemaIdentities::of));
         return new ArrayList<>(all.values());
