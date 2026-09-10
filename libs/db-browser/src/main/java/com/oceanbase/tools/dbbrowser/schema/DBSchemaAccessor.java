@@ -15,6 +15,7 @@
  */
 package com.oceanbase.tools.dbbrowser.schema;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -122,6 +123,23 @@ public interface DBSchemaAccessor {
      * List all user view as DBObjectIdentity
      */
     List<DBObjectIdentity> listAllUserViews(String viewNameLike);
+
+    /**
+     * List table and user view identities together. The default implementation falls back to
+     * {@link #listTables(String, String)} plus {@link #listAllUserViews(String)}; accessors backed by
+     * information_schema (MySQL family) override it with a single scan of information_schema.tables,
+     * halving the cost of cross-schema listing. Only the user-view part is included here; system views
+     * still go through {@link #listAllSystemViews(String)}. Note the default fallback does not filter
+     * the view part by {@code schemaName}, matching {@link #listAllUserViews(String)} semantics, so
+     * callers that pass a non-blank schemaName should filter on their own or use the separate methods
+     * instead.
+     */
+    default List<DBObjectIdentity> listTablesAndViews(String schemaName, String nameLike) {
+        List<DBObjectIdentity> identities =
+                new ArrayList<>(listTables(schemaName, nameLike));
+        identities.addAll(listAllUserViews(nameLike));
+        return identities;
+    }
 
     /**
      * List all system view as DBObjectIdentity

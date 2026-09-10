@@ -58,11 +58,26 @@ public class DBIdentitiesService {
             existedDatabases.forEach(db -> all.computeIfAbsent(db, SchemaIdentities::of));
             return new ArrayList<>(all.values());
         }
-        if (types.contains(DBObjectType.VIEW)) {
-            listViews(schemaAccessor, schemaName, identityNameLike, all);
-        }
-        if (types.contains(DBObjectType.TABLE)) {
-            listTables(schemaAccessor, schemaName, identityNameLike, all);
+        boolean needTables = types.contains(DBObjectType.TABLE);
+        boolean needViews = types.contains(DBObjectType.VIEW);
+        if (needTables && needViews && StringUtils.isBlank(schemaName)) {
+            /**
+             * 跨库同时取表和视图时走合并查询：listTablesAndViews 对 information_schema.tables
+             * 仅做一次全量扫描即同时取出 BASE TABLE 与 VIEW 两类（原先 TABLE、VIEW 各扫一遍，
+             * 大租户下是 listIdentities 的主要耗时来源）；系统视图仍走单独的 show full tables
+             * 查询（代价低）。默认实现退化为原两次调用，语义不变。
+             */
+            schemaAccessor.listTablesAndViews(null, identityNameLike)
+                    .forEach(i -> all.computeIfAbsent(i.getSchemaName(), SchemaIdentities::of).add(i));
+            schemaAccessor.listAllSystemViews(identityNameLike)
+                    .forEach(i -> all.computeIfAbsent(i.getSchemaName(), SchemaIdentities::of).add(i));
+        } else {
+            if (needViews) {
+                listViews(schemaAccessor, schemaName, identityNameLike, all);
+            }
+            if (needTables) {
+                listTables(schemaAccessor, schemaName, identityNameLike, all);
+            }
         }
         if (types.contains(DBObjectType.EXTERNAL_TABLE)) {
             listExternalTables(schemaAccessor, schemaName, identityNameLike, all);
