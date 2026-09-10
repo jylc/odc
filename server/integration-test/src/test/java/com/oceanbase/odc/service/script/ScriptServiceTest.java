@@ -109,13 +109,13 @@ public class ScriptServiceTest extends ServiceTestEnv {
 
     @Test
     public void testBatchPutScript_Success() {
-        scriptService.batchPutScript(Arrays.asList(mockFile));
+        scriptService.batchPutScript(Arrays.asList(mockFile), null);
         Mockito.verify(scriptMetaRepository, times(1)).saveAndFlush(any(ScriptMetaEntity.class));
     }
 
     @Test
     public void testSynchronizeScript() throws IOException {
-        List<ScriptMeta> scriptMetaList = scriptService.batchPutScript(Arrays.asList(mockFile));
+        List<ScriptMeta> scriptMetaList = scriptService.batchPutScript(Arrays.asList(mockFile), null);
         ScriptMeta scriptMeta = scriptService.synchronizeScript(scriptMetaList.get(0).getId());
         Assert.assertEquals(OBJECT_NAME, scriptMeta.getObjectName());
     }

@@ -75,7 +75,7 @@ public class ScriptServiceWithLocalTest extends ServiceTestEnv {
     public void testBatchDownload() throws IOException {
         List<ScriptMeta> scriptMetas = scriptService.batchPutScript(
                 Arrays.asList(createMultipartFile(file1Name, file1Content),
-                        createMultipartFile(file2Name, file2Content)));
+                        createMultipartFile(file2Name, file2Content)), null);
         assertEquals(2, scriptMetas.size());
         List<Long> scriptIds = scriptMetas.stream().map(ScriptMeta::getId).collect(Collectors.toList());
         ResponseEntity<InputStreamResource> entity = scriptService.batchDownload(scriptIds);
@@ -109,7 +109,7 @@ public class ScriptServiceWithLocalTest extends ServiceTestEnv {
         List<ScriptMeta> scriptMetas = scriptService.batchPutScript(
                 Arrays.asList(createMultipartFile(file1Name, file1Content),
                         createMultipartFile(file1Name, file1Content),
-                        createMultipartFile(file2Name, file2Content)));
+                        createMultipartFile(file2Name, file2Content)), null);
         assertEquals(3, scriptMetas.size());
         List<Long> scriptIds = scriptMetas.stream().map(ScriptMeta::getId).collect(Collectors.toList());
         ResponseEntity<InputStreamResource> entity = scriptService.batchDownload(scriptIds);
