@@ -17,6 +17,8 @@ package com.oceanbase.odc.service.session.factory;
 
 import java.sql.Connection;
 import java.sql.Statement;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
@@ -36,6 +38,7 @@ import com.oceanbase.odc.core.session.DefaultConnectionSession;
 import com.oceanbase.odc.core.shared.jdbc.JdbcUrlParser;
 import com.oceanbase.odc.core.sql.execute.task.SqlExecuteTaskManager;
 import com.oceanbase.odc.core.task.TaskManagerFactory;
+import com.oceanbase.odc.plugin.connect.api.SessionExtensionPoint;
 import com.oceanbase.odc.service.connection.model.ConnectionConfig;
 import com.oceanbase.odc.service.connection.model.CreateSessionReq;
 import com.oceanbase.odc.service.connection.util.ConnectionInfoUtil;
@@ -162,23 +165,27 @@ public class DefaultConnectSessionFactory implements ConnectionSessionFactory {
             return;
         }
         log.info("Begin to set nls format.");
-        String nlsDateFormat = session.getSyncJdbcExecutor(ConnectionSessionConstants.BACKEND_DS_KEY).execute(
-                (ConnectionCallback<String>) con -> ConnectionPluginUtil
-                        .getSessionExtension(session.getDialectType()).getVariable(con, "nls_date_format"));
-        ConnectionSessionUtil.setNlsDateFormat(session, Objects.isNull(nlsDateFormat) ? "DD-MON-RR" : nlsDateFormat);
-
-        String nlsTimestampFormat = session.getSyncJdbcExecutor(ConnectionSessionConstants.BACKEND_DS_KEY).execute(
-                (ConnectionCallback<String>) con -> ConnectionPluginUtil
-                        .getSessionExtension(session.getDialectType()).getVariable(con, "nls_timestamp_format"));
+        // One pooled-connection borrow for all three lookups: repeated borrows pay the pool
+        // acquire and per-connection initializer cost three times, and may read the variables
+        // from different pooled sessions.
+        SessionExtensionPoint extensionPoint = ConnectionPluginUtil.getSessionExtension(session.getDialectType());
+        Map<String, String> nlsVariables = session.getSyncJdbcExecutor(ConnectionSessionConstants.BACKEND_DS_KEY)
+                .execute((ConnectionCallback<Map<String, String>>) con -> {
+                    Map<String, String> values = new LinkedHashMap<>();
+                    values.put("nls_date_format", extensionPoint.getVariable(con, "nls_date_format"));
+                    values.put("nls_timestamp_format", extensionPoint.getVariable(con, "nls_timestamp_format"));
+                    values.put("nls_timestamp_tz_format", extensionPoint.getVariable(con, "nls_timestamp_tz_format"));
+                    return values;
+                });
+        ConnectionSessionUtil.setNlsDateFormat(session,
+                Objects.isNull(nlsVariables.get("nls_date_format")) ? "DD-MON-RR"
+                        : nlsVariables.get("nls_date_format"));
         ConnectionSessionUtil.setNlsTimestampFormat(session,
-                Objects.isNull(nlsTimestampFormat) ? "DD-MON-RR" : nlsTimestampFormat);
-
-        String nlsTimestampTZFormat = session.getSyncJdbcExecutor(ConnectionSessionConstants.BACKEND_DS_KEY).execute(
-                (ConnectionCallback<String>) con -> ConnectionPluginUtil
-                        .getSessionExtension(session.getDialectType()).getVariable(con, "nls_timestamp_tz_format"));
+                Objects.isNull(nlsVariables.get("nls_timestamp_format")) ? "DD-MON-RR"
+                        : nlsVariables.get("nls_timestamp_format"));
         ConnectionSessionUtil.setNlsTimestampTZFormat(session,
-                Objects.isNull(nlsTimestampTZFormat) ? "DD-MON-RR" : nlsTimestampTZFormat);
-
+                Objects.isNull(nlsVariables.get("nls_timestamp_tz_format")) ? "DD-MON-RR"
+                        : nlsVariables.get("nls_timestamp_tz_format"));
         log.info("Set nls format completed.");
     }
 

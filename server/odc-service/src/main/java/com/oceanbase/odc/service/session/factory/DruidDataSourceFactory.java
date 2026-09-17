@@ -84,7 +84,10 @@ public class DruidDataSourceFactory extends OBConsoleDataSourceFactory {
         dataSource.setTimeBetweenEvictionRunsMillis(30000);
         dataSource.setDefaultAutoCommit(true);
         dataSource.setMaxActive(5);
-        dataSource.setInitialSize(2);
+        // Session creation only borrows one backend connection at a time (NLS lookups run serially
+        // on a single borrow); pre-creating more just adds extra physical handshakes and
+        // init-script executions to every session creation. The pool still grows on demand.
+        dataSource.setInitialSize(1);
         // wait for get available connection from connection pool
         dataSource.setMaxWait(5000L);
         /**
