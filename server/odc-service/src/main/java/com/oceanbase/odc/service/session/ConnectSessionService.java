@@ -87,7 +87,6 @@ import com.oceanbase.odc.service.iam.HorizontalDataPermissionValidator;
 import com.oceanbase.odc.service.iam.auth.AuthenticationFacade;
 import com.oceanbase.odc.service.iam.auth.AuthorizationFacade;
 import com.oceanbase.odc.service.lab.model.LabProperties;
-import com.oceanbase.odc.service.permission.database.DatabasePermissionHelper;
 import com.oceanbase.odc.service.permission.database.model.DatabasePermissionType;
 import com.oceanbase.odc.service.session.factory.DefaultConnectSessionFactory;
 import com.oceanbase.odc.service.session.factory.DefaultConnectSessionIdGenerator;
@@ -141,8 +140,6 @@ public class ConnectSessionService {
     private HorizontalDataPermissionValidator horizontalDataPermissionValidator;
     @Autowired
     private SecurityManager securityManager;
-    @Autowired
-    private DatabasePermissionHelper databasePermissionHelper;
     @Autowired
     private CloudMetadataClient cloudMetadataClient;
     @Autowired
@@ -226,21 +223,16 @@ public class ConnectSessionService {
     public ConnectionSession create(@NotNull CreateSessionReq req) {
         Long dataSourceId;
         String schemaName;
+        ConnectionConfig connection = null;
         if (req.getDbId() != null) {
             // create session by database id
             Database database = databaseService.detail(req.getDbId());
-            if (authenticationFacade.currentUser().getOrganizationType() == OrganizationType.TEAM) {
-                if (Objects.isNull(database.getProject())) {
-                    throw new AccessDeniedException();
-                }
-                Map<Long, Set<DatabasePermissionType>> id2PermissionTypes =
-                        databasePermissionHelper.getPermissions(Collections.singleton(req.getDbId()));
-                if (!id2PermissionTypes.containsKey(req.getDbId()) || id2PermissionTypes.get(req.getDbId()).isEmpty()) {
-                    throw new AccessDeniedException();
-                }
-            }
+            checkDBPermission(database);
             schemaName = database.getName();
             dataSourceId = database.getDataSource().getId();
+            // Reuse the ConnectionConfig already loaded by databaseService.detail to avoid a
+            // duplicate repository + attribute query and password adaptation.
+            connection = database.getDataSource();
         } else {
             // create session by datasource id
             PreConditions.notNull(req.getDsId(), "DatasourceId");
@@ -252,7 +244,9 @@ public class ConnectSessionService {
             dataSourceId = req.getDsId();
         }
         preCheckSessionLimit();
-        ConnectionConfig connection = connectionService.getForConnectionSkipPermissionCheck(dataSourceId);
+        if (connection == null) {
+            connection = connectionService.getForConnectionSkipPermissionCheck(dataSourceId);
+        }
         cloudMetadataClient.checkPermission(OBTenant.of(connection.getClusterName(),
                 connection.getTenantName()), connection.getInstanceType(), false, CloudPermissionAction.READONLY);
         PreConditions.validArgumentState(Objects.nonNull(connection.getPassword()),
@@ -440,6 +434,21 @@ public class ConnectSessionService {
         }
         connectionSessionManager.cancelExpire(session);
         return session;
+    }
+
+    private void checkDBPermission(Database database) {
+        if (authenticationFacade.currentUser().getOrganizationType() == OrganizationType.TEAM) {
+            if (Objects.isNull(database.getProject())) {
+                throw new AccessDeniedException();
+            }
+            // Reuse the authorizedPermissionTypes already populated by databaseService.detail
+            // (which calls entityToModel with includesPermittedAction=true) instead of querying
+            // database entities, org-wide project roles and database permissions again.
+            Set<DatabasePermissionType> permissionTypes = database.getAuthorizedPermissionTypes();
+            if (permissionTypes == null || permissionTypes.isEmpty()) {
+                throw new AccessDeniedException();
+            }
+        }
     }
 
     private void preCheckSessionLimit() {
