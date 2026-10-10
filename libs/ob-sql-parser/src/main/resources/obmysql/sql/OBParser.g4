@@ -2018,6 +2018,7 @@ insert_vals
     : expr_or_default
     | empty
     | insert_vals Comma expr_or_default
+    | insert_vals Comma empty
     ;
 
 expr_or_default
