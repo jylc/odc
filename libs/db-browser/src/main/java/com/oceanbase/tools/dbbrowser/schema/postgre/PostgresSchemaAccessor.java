@@ -15,7 +15,9 @@
  */
 package com.oceanbase.tools.dbbrowser.schema.postgre;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -25,8 +27,15 @@ import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.jdbc.core.JdbcOperations;
 
 import com.oceanbase.tools.dbbrowser.model.DBColumnGroupElement;
+import com.oceanbase.tools.dbbrowser.model.DBConstraintType;
 import com.oceanbase.tools.dbbrowser.model.DBDatabase;
 import com.oceanbase.tools.dbbrowser.model.DBFunction;
+import com.oceanbase.tools.dbbrowser.model.DBIndexAlgorithm;
+import com.oceanbase.tools.dbbrowser.model.DBIndexType;
+import com.oceanbase.tools.dbbrowser.model.DBMViewRefreshParameter;
+import com.oceanbase.tools.dbbrowser.model.DBMViewRefreshRecord;
+import com.oceanbase.tools.dbbrowser.model.DBMViewRefreshRecordParam;
+import com.oceanbase.tools.dbbrowser.model.DBMaterializedView;
 import com.oceanbase.tools.dbbrowser.model.DBObjectIdentity;
 import com.oceanbase.tools.dbbrowser.model.DBPLObjectIdentity;
 import com.oceanbase.tools.dbbrowser.model.DBPackage;
@@ -238,7 +247,39 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
 
     @Override
     public List<DBTableColumn> listTableColumns(String schemeName, String tableName) {
-        throw new UnsupportedOperationException("Not supported yet");
+        String sql = "SELECT c.column_name, "
+                + "COALESCE(NULLIF(c.udt_name, ''), c.data_type) AS type_name, "
+                + "CASE WHEN c.character_maximum_length IS NOT NULL "
+                + "THEN COALESCE(NULLIF(c.udt_name, ''), c.data_type) || '(' || c.character_maximum_length || ')' "
+                + "WHEN c.data_type IN ('numeric', 'decimal') AND c.numeric_precision IS NOT NULL AND c.numeric_scale IS NOT NULL "
+                + "THEN COALESCE(NULLIF(c.udt_name, ''), c.data_type) || '(' || c.numeric_precision || ',' || c.numeric_scale || ')' "
+                + "ELSE COALESCE(NULLIF(c.udt_name, ''), c.data_type) END AS full_type_name, "
+                + "c.numeric_scale, c.numeric_precision, c.is_nullable, c.column_default, c.ordinal_position, "
+                + "COALESCE(col_description(to_regclass(format('%I.%I', c.table_schema, c.table_name)), c.ordinal_position), '') AS column_comment, "
+                + "(c.column_default LIKE 'nextval%') AS is_auto_increment "
+                + "FROM information_schema.columns c "
+                + "WHERE c.table_schema = ? AND c.table_name = ? "
+                + "ORDER BY c.ordinal_position";
+        return jdbcOperations.query(sql, (rs, rowNum) -> {
+            DBTableColumn column = new DBTableColumn();
+            column.setSchemaName(schemeName);
+            column.setTableName(tableName);
+            column.setName(rs.getString("column_name"));
+            column.setTypeName(rs.getString("type_name"));
+            column.setFullTypeName(rs.getString("full_type_name"));
+            if (rs.getObject("numeric_scale") != null) {
+                column.setScale(rs.getInt("numeric_scale"));
+            }
+            if (rs.getObject("numeric_precision") != null) {
+                column.setPrecision(rs.getLong("numeric_precision"));
+            }
+            column.setNullable("YES".equals(rs.getString("is_nullable")));
+            column.setDefaultValue(rs.getString("column_default"));
+            column.setComment(rs.getString("column_comment"));
+            column.setOrdinalPosition(rs.getInt("ordinal_position"));
+            column.setAutoIncrement(rs.getBoolean("is_auto_increment"));
+            return column;
+        }, schemeName, tableName);
     }
 
     @Override
@@ -312,7 +353,59 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
 
     @Override
     public List<DBTableConstraint> listTableConstraints(String schemaName, String tableName) {
-        throw new UnsupportedOperationException("Not supported yet");
+        String sql = "SELECT con.conname AS constraint_name, "
+                + "CASE con.contype WHEN 'p' THEN 'PRIMARY_KEY' WHEN 'u' THEN 'UNIQUE_KEY' "
+                + "WHEN 'f' THEN 'FOREIGN_KEY' WHEN 'c' THEN 'CHECK' ELSE 'UNKNOWN' END AS constraint_type, "
+                + "COALESCE(att.attname, '') AS column_name, "
+                + "COALESCE(rns.nspname, '') AS ref_schema, "
+                + "COALESCE(rtbl.relname, '') AS ref_table, "
+                + "COALESCE(ratt.attname, '') AS ref_column, "
+                + "pg_get_constraintdef(con.oid) AS definition "
+                + "FROM pg_constraint con "
+                + "JOIN pg_class t ON con.conrelid = t.oid "
+                + "JOIN pg_namespace ns ON t.relnamespace = ns.oid "
+                + "LEFT JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS ck(attnum, ord) ON true "
+                + "LEFT JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = ck.attnum "
+                + "LEFT JOIN pg_class rtbl ON con.confrelid = rtbl.oid "
+                + "LEFT JOIN pg_namespace rns ON rtbl.relnamespace = rns.oid "
+                + "LEFT JOIN LATERAL unnest(con.confkey) WITH ORDINALITY AS rk(attnum, ord) ON rk.attnum IS NOT NULL "
+                + "LEFT JOIN pg_attribute ratt ON ratt.attrelid = con.confrelid AND ratt.attnum = rk.attnum "
+                + "WHERE ns.nspname = ? AND t.relname = ? "
+                + "ORDER BY con.conname, ck.ord, rk.ord";
+        Map<String, DBTableConstraint> constraints = new LinkedHashMap<>();
+        jdbcOperations.query(sql, rs -> {
+            String name = rs.getString("constraint_name");
+            String typeName = rs.getString("constraint_type");
+            String columnName = rs.getString("column_name");
+            String refSchema = rs.getString("ref_schema");
+            String refTable = rs.getString("ref_table");
+            String refColumn = rs.getString("ref_column");
+            String definition = rs.getString("definition");
+            DBTableConstraint constraint = constraints.computeIfAbsent(name, k -> {
+                DBTableConstraint c = new DBTableConstraint();
+                c.setSchemaName(schemaName);
+                c.setTableName(tableName);
+                c.setName(name);
+                c.setType(DBConstraintType.valueOf(typeName));
+                c.setColumnNames(new ArrayList<>());
+                c.setReferenceColumnNames(new ArrayList<>());
+                if (c.getType() == DBConstraintType.CHECK) {
+                    c.setCheckClause(definition);
+                }
+                if (refTable != null && !refTable.isEmpty()) {
+                    c.setReferenceSchemaName(refSchema);
+                    c.setReferenceTableName(refTable);
+                }
+                return c;
+            });
+            if (columnName != null && !columnName.isEmpty()) {
+                constraint.getColumnNames().add(columnName);
+            }
+            if (refColumn != null && !refColumn.isEmpty()) {
+                constraint.getReferenceColumnNames().add(refColumn);
+            }
+        }, schemaName, tableName);
+        return new ArrayList<>(constraints.values());
     }
 
     @Override
@@ -322,22 +415,114 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
 
     @Override
     public List<DBTableIndex> listTableIndexes(String schemaName, String tableName) {
-        throw new UnsupportedOperationException("Not supported yet");
-    }
-
-    @Override
-    public String getTableDDL(String schemaName, String tableName) {
-        throw new UnsupportedOperationException("Not supported yet");
+        String sql = "SELECT i.relname AS index_name, ix.indisprimary AS is_primary, "
+                + "ix.indisunique AS is_unique, "
+                + "COALESCE(obj_description(i.oid), '') AS index_comment, "
+                + "COALESCE(att.attname, '') AS column_name "
+                + "FROM pg_index ix "
+                + "JOIN pg_class t ON ix.indrelid = t.oid "
+                + "JOIN pg_namespace ns ON t.relnamespace = ns.oid "
+                + "JOIN pg_class i ON ix.indexrelid = i.oid "
+                + "LEFT JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS ik(attnum, ord) ON true "
+                + "LEFT JOIN pg_attribute att ON att.attrelid = t.oid AND att.attnum = ik.attnum "
+                + "WHERE ns.nspname = ? AND t.relname = ? "
+                + "ORDER BY i.relname, ik.ord";
+        Map<String, DBTableIndex> indexes = new LinkedHashMap<>();
+        jdbcOperations.query(sql, rs -> {
+            String name = rs.getString("index_name");
+            boolean primary = rs.getBoolean("is_primary");
+            boolean unique = rs.getBoolean("is_unique");
+            String indexComment = rs.getString("index_comment");
+            String columnName = rs.getString("column_name");
+            DBTableIndex index = indexes.computeIfAbsent(name, k -> {
+                DBTableIndex idx = new DBTableIndex();
+                idx.setSchemaName(schemaName);
+                idx.setTableName(tableName);
+                idx.setName(name);
+                idx.setPrimary(primary);
+                idx.setUnique(primary || unique);
+                idx.setType(primary || unique ? DBIndexType.UNIQUE : DBIndexType.NORMAL);
+                idx.setAlgorithm(DBIndexAlgorithm.BTREE);
+                idx.setComment(indexComment);
+                idx.setGlobal(true);
+                idx.setVisible(true);
+                idx.setColumnNames(new ArrayList<>());
+                return idx;
+            });
+            if (columnName != null && !columnName.isEmpty()) {
+                index.getColumnNames().add(columnName);
+            }
+        }, schemaName, tableName);
+        return new ArrayList<>(indexes.values());
     }
 
     @Override
     public DBTableOptions getTableOptions(String schemaName, String tableName) {
-        throw new UnsupportedOperationException("Not supported yet");
+        DBTableOptions options = new DBTableOptions();
+        String sql =
+                "SELECT COALESCE(obj_description(to_regclass(format('%I.%I', ?, ?)), 'pg_class'), '') AS table_comment";
+        options.setComment(jdbcOperations.queryForObject(sql, String.class, schemaName, tableName));
+        return options;
     }
 
     @Override
     public DBTableOptions getTableOptions(String schemaName, String tableName, String ddl) {
-        throw new UnsupportedOperationException("Not supported yet");
+        return getTableOptions(schemaName, tableName);
+    }
+
+    private static String quoteIdentifier(String identifier) {
+        return "\"" + identifier.replace("\"", "\"\"") + "\"";
+    }
+
+    @Override
+    public String getTableDDL(String schemaName, String tableName) {
+        List<DBTableColumn> columns = listTableColumns(schemaName, tableName);
+        List<DBTableConstraint> constraints = listTableConstraints(schemaName, tableName);
+        StringBuilder ddl = new StringBuilder("CREATE TABLE ")
+                .append(quoteIdentifier(schemaName)).append('.').append(quoteIdentifier(tableName)).append(" (\n");
+        List<String> columnDefs = new ArrayList<>();
+        for (DBTableColumn column : columns) {
+            StringBuilder def = new StringBuilder("    ").append(quoteIdentifier(column.getName()))
+                    .append(' ').append(column.getFullTypeName());
+            if (column.getDefaultValue() != null) {
+                def.append(" DEFAULT ").append(column.getDefaultValue());
+            }
+            if (Boolean.FALSE.equals(column.getNullable())) {
+                def.append(" NOT NULL");
+            }
+            columnDefs.add(def.toString());
+        }
+        for (DBTableConstraint constraint : constraints) {
+            StringBuilder def = new StringBuilder("    ");
+            if (constraint.getType() == DBConstraintType.CHECK) {
+                def.append(constraint.getCheckClause());
+                columnDefs.add(def.toString());
+                continue;
+            }
+            def.append("CONSTRAINT ").append(quoteIdentifier(constraint.getName())).append(' ')
+                    .append(constraint.getType().getValue());
+            if (constraint.getType() != DBConstraintType.NOT_NULL) {
+                def.append(" (").append(String.join(", ",
+                        constraint.getColumnNames().stream().map(PostgresSchemaAccessor::quoteIdentifier)
+                                .collect(Collectors.toList())))
+                        .append(')');
+            }
+            if (constraint.getType() == DBConstraintType.FOREIGN_KEY
+                    && constraint.getReferenceTableName() != null) {
+                def.append(" REFERENCES ");
+                if (constraint.getReferenceSchemaName() != null) {
+                    def.append(quoteIdentifier(constraint.getReferenceSchemaName())).append('.');
+                }
+                def.append(quoteIdentifier(constraint.getReferenceTableName())).append(" (")
+                        .append(String.join(", ",
+                                constraint.getReferenceColumnNames().stream()
+                                        .map(PostgresSchemaAccessor::quoteIdentifier).collect(Collectors.toList())))
+                        .append(')');
+            }
+            columnDefs.add(def.toString());
+        }
+        ddl.append(String.join(",\n", columnDefs)).append("\n);");
+        return ddl.toString();
     }
 
     @Override
