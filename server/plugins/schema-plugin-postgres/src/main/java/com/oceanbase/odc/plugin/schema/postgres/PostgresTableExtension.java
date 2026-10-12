@@ -21,7 +21,13 @@ import org.pf4j.Extension;
 
 import com.oceanbase.odc.plugin.schema.obmysql.OBMySQLTableExtension;
 import com.oceanbase.odc.plugin.schema.postgres.utils.DBAccessorUtil;
+import com.oceanbase.tools.dbbrowser.model.DBObjectType;
+import com.oceanbase.tools.dbbrowser.model.DBTable;
+import com.oceanbase.tools.dbbrowser.model.DBTablePartition;
+import com.oceanbase.tools.dbbrowser.model.DBTableStats;
 import com.oceanbase.tools.dbbrowser.schema.DBSchemaAccessor;
+
+import lombok.NonNull;
 
 @Extension
 public class PostgresTableExtension extends OBMySQLTableExtension {
@@ -29,6 +35,40 @@ public class PostgresTableExtension extends OBMySQLTableExtension {
     @Override
     protected DBSchemaAccessor getSchemaAccessor(Connection connection) {
         return DBAccessorUtil.getSchemaAccessor(connection);
+    }
+
+    /**
+     * PostgreSQL 不依赖 OBMySQL 方言的 DDL 解析器与统计扩展点：partition 置空、stats 降级为空，
+     * 其余元数据（列/约束/索引/DDL/表选项）由 {@code PostgresSchemaAccessor} 提供
+     */
+    @Override
+    public DBTable getDetail(@NonNull Connection connection, @NonNull String schemaName,
+            @NonNull String tableName) {
+        DBSchemaAccessor schemaAccessor = getSchemaAccessor(connection);
+        DBTable table = new DBTable();
+        table.setSchemaName(schemaName);
+        table.setOwner(schemaName);
+        table.setName(tableName);
+        table.setColumns(schemaAccessor.listTableColumns(schemaName, tableName));
+        table.setConstraints(schemaAccessor.listTableConstraints(schemaName, tableName));
+        table.setIndexes(schemaAccessor.listTableIndexes(schemaName, tableName));
+        table.setType(DBObjectType.TABLE);
+        table.setPartition(new DBTablePartition());
+        table.setDDL(schemaAccessor.getTableDDL(schemaName, tableName));
+        table.setTableOptions(schemaAccessor.getTableOptions(schemaName, tableName));
+        table.setStats(new DBTableStats());
+        try {
+            table.setColumnGroups(schemaAccessor.listTableColumnGroups(schemaName, tableName));
+        } catch (Exception e) {
+            // eat the exception
+        }
+        return table;
+    }
+
+    @Override
+    protected DBTableStats getTableStats(@NonNull Connection connection, @NonNull String schemaName,
+            @NonNull String tableName) {
+        return new DBTableStats();
     }
 
     @Override
