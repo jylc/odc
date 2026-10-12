@@ -21,7 +21,6 @@ import org.pf4j.Extension;
 
 import com.oceanbase.odc.plugin.schema.obmysql.OBMySQLTableExtension;
 import com.oceanbase.odc.plugin.schema.postgres.utils.DBAccessorUtil;
-import com.oceanbase.tools.dbbrowser.model.DBObjectType;
 import com.oceanbase.tools.dbbrowser.model.DBTable;
 import com.oceanbase.tools.dbbrowser.model.DBTablePartition;
 import com.oceanbase.tools.dbbrowser.model.DBTableStats;
@@ -38,8 +37,8 @@ public class PostgresTableExtension extends OBMySQLTableExtension {
     }
 
     /**
-     * PostgreSQL 不依赖 OBMySQL 方言的 DDL 解析器与统计扩展点：partition 置空、stats 降级为空，
-     * 其余元数据（列/约束/索引/DDL/表选项）由 {@code PostgresSchemaAccessor} 提供
+     * PostgreSQL 不依赖 OBMySQL 方言的 DDL 解析器与统计扩展点：partition 置空、stats 降级为空， 其余元数据（列/约束/索引/DDL/表选项）由
+     * {@code PostgresSchemaAccessor} 提供
      */
     @Override
     public DBTable getDetail(@NonNull Connection connection, @NonNull String schemaName,
@@ -52,7 +51,6 @@ public class PostgresTableExtension extends OBMySQLTableExtension {
         table.setColumns(schemaAccessor.listTableColumns(schemaName, tableName));
         table.setConstraints(schemaAccessor.listTableConstraints(schemaName, tableName));
         table.setIndexes(schemaAccessor.listTableIndexes(schemaName, tableName));
-        table.setType(DBObjectType.TABLE);
         table.setPartition(new DBTablePartition());
         table.setDDL(schemaAccessor.getTableDDL(schemaName, tableName));
         table.setTableOptions(schemaAccessor.getTableOptions(schemaName, tableName));
@@ -69,10 +67,5 @@ public class PostgresTableExtension extends OBMySQLTableExtension {
     protected DBTableStats getTableStats(@NonNull Connection connection, @NonNull String schemaName,
             @NonNull String tableName) {
         return new DBTableStats();
-    }
-
-    @Override
-    public boolean syncExternalTableFiles(Connection connection, String schemaName, String tableName) {
-        throw new UnsupportedOperationException("not implemented yet");
     }
 }
