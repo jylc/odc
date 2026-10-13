@@ -86,10 +86,9 @@ public class OdcConstants {
      */
     public static final String ORACLE_DRIVER_CLASS_NAME = "oracle.jdbc.driver.OracleDriver";
     /**
-     * GaussDB 200 driver class name (gsjdbc200.jar, renamed package to co-exist with the open-source
-     * org.postgresql driver in the same JVM)
+     * postgreSql driver class name
      */
-    public static final String POSTGRES_DRIVER_CLASS_NAME = "com.huawei.gauss200.jdbc.Driver";
+    public static final String POSTGRES_DRIVER_CLASS_NAME = "org.postgresql.Driver";
 
     /**
      * Parameters name

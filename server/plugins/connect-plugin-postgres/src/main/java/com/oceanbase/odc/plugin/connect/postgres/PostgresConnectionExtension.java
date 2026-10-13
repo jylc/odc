@@ -50,7 +50,7 @@ public class PostgresConnectionExtension extends OBMySQLConnectionExtension {
         String schema = properties.getDefaultSchema();
 
         StringBuilder jdbcUrl = new StringBuilder();
-        jdbcUrl.append("jdbc:gaussdb://").append(host).append(":").append(port).append("/").append(catalogName);
+        jdbcUrl.append("jdbc:postgresql://").append(host).append(":").append(port).append("/").append(catalogName);
         if (StringUtils.isNotBlank(schema)) {
             jdbcUrl.append("?currentSchema=").append(schema);
         }
