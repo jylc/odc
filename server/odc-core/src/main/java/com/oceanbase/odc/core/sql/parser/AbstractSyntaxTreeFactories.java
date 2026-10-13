@@ -34,9 +34,8 @@ public class AbstractSyntaxTreeFactories {
             return new OBOracleAstFactory(timeoutMillis);
         } else if (dialectType.isMysql() || dialectType.isPostgreSql()) {
             /**
-             * PostgreSQL 复用 OB MySQL 语法解析器做 SQL 类型识别（与 DORIS 同策略）：
-             * 常见 DML/DDL 可正确识别类型；PG 特有语法解析失败时按语法错误降级，
-             * SQL 窗口规则对语法错误语句跳过类型检查
+             * PostgreSQL 复用 OB MySQL 语法解析器做 SQL 类型识别（与 DORIS 同策略）： 常见 DML/DDL 可正确识别类型；PG 特有语法解析失败时按语法错误降级， SQL
+             * 窗口规则对语法错误语句跳过类型检查
              */
             return new OBMySQLAstFactory(timeoutMillis);
         }
