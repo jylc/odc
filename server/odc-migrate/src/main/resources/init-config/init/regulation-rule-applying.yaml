@@ -38,6 +38,7 @@
       - 'OB_ORACLE'
       - 'MYSQL'
       - 'ODP_SHARDING_OB_MYSQL'
+      - 'POSTGRESQL'
   propertiesJson: '{"${com.oceanbase.odc.builtin-resource.regulation.rule.sql-console.allow-sql-types.metadata.name}":["SELECT", "EXPLAIN", "SHOW", "HELP", "START_TRANS", "COMMIT", "ROLLBACK", "SORT", "DESC"]}'
 - enabled: 1
   level: 1
@@ -129,6 +130,7 @@
       - 'OB_ORACLE'
       - 'MYSQL'
       - 'ODP_SHARDING_OB_MYSQL'
+      - 'POSTGRESQL'
   propertiesJson: '{"${com.oceanbase.odc.builtin-resource.regulation.rule.sql-console.allow-sql-types.metadata.name}":["UPDATE", "DELETE", "INSERT", "SELECT", "CREATE", "DROP", "ALTER", "REPLACE", "SET", "USE_DB", "EXPLAIN", "SHOW", "HELP", "START_TRANS", "COMMIT", "ROLLBACK", "SORT", "DESC", "TRUNCATE", "OTHERS"]}'
 - enabled: 1
   level: 1
