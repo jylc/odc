@@ -43,6 +43,20 @@ public abstract class StringUtils extends org.apache.commons.lang3.StringUtils {
         return quoteSqlIdentifier(str, ORACLE_IDENTIFIER_WRAP_CHAR);
     }
 
+    /**
+     * PG 系（PostgreSQL/GaussDB）标识符使用双引号包裹，与 Oracle 引号风格一致
+     */
+    public static String quotePgIdentifier(final String str) {
+        return quoteSqlIdentifier(str, '"');
+    }
+
+    /**
+     * PG 系字符串字面量以 '' 转义单引号（默认不含反斜杠转义）
+     */
+    public static String quotePgValue(final String str) {
+        return quoteSqlValue(str, '\'');
+    }
+
     static String quoteSqlIdentifier(final String str, final char wrapChar) {
         if (null == str) {
             return null;

@@ -107,6 +107,7 @@ import com.oceanbase.tools.dbbrowser.parser.result.ParseSqlResult;
 import com.oceanbase.tools.dbbrowser.schema.DBSchemaAccessor;
 import com.oceanbase.tools.dbbrowser.util.MySQLSqlBuilder;
 import com.oceanbase.tools.dbbrowser.util.OracleSqlBuilder;
+import com.oceanbase.tools.dbbrowser.util.PostgresSqlBuilder;
 import com.oceanbase.tools.dbbrowser.util.SqlBuilder;
 
 import lombok.NonNull;
@@ -158,6 +159,8 @@ public class ConnectConsoleService {
             sqlBuilder = new OracleSqlBuilder();
         } else if (dialectType.isDoris()) {
             sqlBuilder = new MySQLSqlBuilder();
+        } else if (dialectType.isPostgreSql()) {
+            sqlBuilder = new PostgresSqlBuilder();
         } else {
             throw new IllegalArgumentException("Unsupported dialect type, " + dialectType);
         }
