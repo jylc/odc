@@ -243,6 +243,7 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
 
     @Override
     public List<DBTableColumn> listTableColumns(String schemeName, String tableName) {
+        // GaussDB 兼容：不使用 to_regclass/format（PG 9.4+），改用 pg_class 关联子查询取 oid
         String sql = "SELECT c.column_name, "
                 + "COALESCE(NULLIF(c.udt_name, ''), c.data_type) AS type_name, "
                 + "CASE WHEN c.character_maximum_length IS NOT NULL "
@@ -251,7 +252,9 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
                 + "THEN COALESCE(NULLIF(c.udt_name, ''), c.data_type) || '(' || c.numeric_precision || ',' || c.numeric_scale || ')' "
                 + "ELSE COALESCE(NULLIF(c.udt_name, ''), c.data_type) END AS full_type_name, "
                 + "c.numeric_scale, c.numeric_precision, c.is_nullable, c.column_default, c.ordinal_position, "
-                + "COALESCE(col_description(to_regclass(format('%I.%I', c.table_schema, c.table_name)), c.ordinal_position), '') AS column_comment, "
+                + "COALESCE(col_description((SELECT c2.oid FROM pg_class c2 "
+                + "JOIN pg_namespace n2 ON n2.oid = c2.relnamespace "
+                + "WHERE n2.nspname = c.table_schema AND c2.relname = c.table_name), c.ordinal_position), '') AS column_comment, "
                 + "(c.column_default LIKE 'nextval%') AS is_auto_increment "
                 + "FROM information_schema.columns c "
                 + "WHERE c.table_schema = ? AND c.table_name = ? "
@@ -349,6 +352,7 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
 
     @Override
     public List<DBTableConstraint> listTableConstraints(String schemaName, String tableName) {
+        // GaussDB 兼容：不使用 LATERAL/WITH ORDINALITY（PG 9.3/9.4+），改用 generate_subscripts（8.1+）
         String sql = "SELECT con.conname AS constraint_name, "
                 + "CASE con.contype WHEN 'p' THEN 'PRIMARY_KEY' WHEN 'u' THEN 'UNIQUE_KEY' "
                 + "WHEN 'f' THEN 'FOREIGN_KEY' WHEN 'c' THEN 'CHECK' ELSE 'UNKNOWN' END AS constraint_type, "
@@ -360,14 +364,13 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
                 + "FROM pg_constraint con "
                 + "JOIN pg_class t ON con.conrelid = t.oid "
                 + "JOIN pg_namespace ns ON t.relnamespace = ns.oid "
-                + "LEFT JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS ck(attnum, ord) ON true "
-                + "LEFT JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = ck.attnum "
+                + "LEFT JOIN generate_subscripts(con.conkey, 1) AS ord ON true "
+                + "LEFT JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[ord] "
                 + "LEFT JOIN pg_class rtbl ON con.confrelid = rtbl.oid "
                 + "LEFT JOIN pg_namespace rns ON rtbl.relnamespace = rns.oid "
-                + "LEFT JOIN LATERAL unnest(con.confkey) WITH ORDINALITY AS rk(attnum, ord) ON rk.attnum IS NOT NULL "
-                + "LEFT JOIN pg_attribute ratt ON ratt.attrelid = con.confrelid AND ratt.attnum = rk.attnum "
+                + "LEFT JOIN pg_attribute ratt ON ratt.attrelid = con.confrelid AND ratt.attnum = con.confkey[ord] "
                 + "WHERE ns.nspname = ? AND t.relname = ? "
-                + "ORDER BY con.conname, ck.ord, rk.ord";
+                + "ORDER BY con.conname, ord";
         Map<String, DBTableConstraint> constraints = new LinkedHashMap<>();
         jdbcOperations.query(sql, rs -> {
             String name = rs.getString("constraint_name");
@@ -411,6 +414,7 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
 
     @Override
     public List<DBTableIndex> listTableIndexes(String schemaName, String tableName) {
+        // GaussDB 兼容：不使用 LATERAL/WITH ORDINALITY（PG 9.3/9.4+），改用 generate_subscripts（8.1+）
         String sql = "SELECT i.relname AS index_name, ix.indisprimary AS is_primary, "
                 + "ix.indisunique AS is_unique, "
                 + "COALESCE(obj_description(i.oid), '') AS index_comment, "
@@ -419,10 +423,10 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
                 + "JOIN pg_class t ON ix.indrelid = t.oid "
                 + "JOIN pg_namespace ns ON t.relnamespace = ns.oid "
                 + "JOIN pg_class i ON ix.indexrelid = i.oid "
-                + "LEFT JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS ik(attnum, ord) ON true "
-                + "LEFT JOIN pg_attribute att ON att.attrelid = t.oid AND att.attnum = ik.attnum "
+                + "LEFT JOIN generate_subscripts(ix.indkey, 1) AS ik_ord ON true "
+                + "LEFT JOIN pg_attribute att ON att.attrelid = t.oid AND att.attnum = ix.indkey[ik_ord] "
                 + "WHERE ns.nspname = ? AND t.relname = ? "
-                + "ORDER BY i.relname, ik.ord";
+                + "ORDER BY i.relname, ik_ord";
         Map<String, DBTableIndex> indexes = new LinkedHashMap<>();
         jdbcOperations.query(sql, rs -> {
             String name = rs.getString("index_name");
@@ -455,8 +459,10 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
     @Override
     public DBTableOptions getTableOptions(String schemaName, String tableName) {
         DBTableOptions options = new DBTableOptions();
-        String sql =
-                "SELECT COALESCE(obj_description(to_regclass(format('%I.%I', ?, ?)), 'pg_class'), '') AS table_comment";
+        // GaussDB 兼容：不使用 to_regclass/format（PG 9.4+），标量子查询对不存在的表返回空串
+        String sql = "SELECT COALESCE((SELECT obj_description(c.oid, 'pg_class') "
+                + "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                + "WHERE n.nspname = ? AND c.relname = ? LIMIT 1), '') AS table_comment";
         options.setComment(jdbcOperations.queryForObject(sql, String.class, schemaName, tableName));
         return options;
     }
