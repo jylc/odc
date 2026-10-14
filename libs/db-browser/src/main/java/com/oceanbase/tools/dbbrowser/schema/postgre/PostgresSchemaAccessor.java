@@ -24,7 +24,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import org.springframework.jdbc.BadSqlGrammarException;
+import org.springframework.jdbc.core.BeanPropertyRowMapper;
 import org.springframework.jdbc.core.JdbcOperations;
+import org.springframework.jdbc.core.RowMapper;
 
 import com.oceanbase.tools.dbbrowser.model.DBColumnGroupElement;
 import com.oceanbase.tools.dbbrowser.model.DBConstraintType;
@@ -58,6 +60,9 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class PostgresSchemaAccessor implements DBSchemaAccessor {
+
+    private static final RowMapper<DBObjectIdentity> IDENTITY_MAPPER =
+            new BeanPropertyRowMapper<>(DBObjectIdentity.class);
 
     protected JdbcOperations jdbcOperations;
 
@@ -134,32 +139,127 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
 
     @Override
     public List<String> showTablesLike(String schemaName, String tableNameLike) {
-        throw new UnsupportedOperationException("Not supported yet");
+        StringBuilder sb = new StringBuilder();
+        sb.append("select table_name from information_schema.tables where table_schema = ?");
+        sb.append(" and table_type = 'BASE TABLE' ");
+        sb.append(" and table_name not in (SELECT relname FROM pg_class c ");
+        sb.append(" JOIN pg_inherits i ON c.oid = i.inhrelid)");
+        if (StringUtils.isNotBlank(tableNameLike)) {
+            sb.append(" and table_name like ?");
+        }
+        sb.append(" order by table_name");
+        if (StringUtils.isNotBlank(tableNameLike)) {
+            return jdbcOperations.queryForList(sb.toString(), String.class, schemaName, tableNameLike);
+        }
+        return jdbcOperations.queryForList(sb.toString(), String.class, schemaName);
     }
 
     @Override
     public List<DBObjectIdentity> listTables(String schemaName, String tableNameLike) {
-        throw new UnsupportedOperationException("Not supported yet");
+        // GaussDB 兼容：纯 information_schema 查询；排除分区子表，与 showTables 语义一致
+        StringBuilder sb = new StringBuilder();
+        sb.append("SELECT table_schema AS schema_name, 'TABLE' AS type, table_name AS name ");
+        sb.append("FROM information_schema.tables ");
+        sb.append("WHERE table_type = 'BASE TABLE' ");
+        sb.append("AND table_name NOT IN (SELECT relname FROM pg_class c ");
+        sb.append("JOIN pg_inherits i ON c.oid = i.inhrelid) ");
+        sb.append("AND table_schema NOT LIKE 'pg%' ");
+        sb.append("AND table_schema <> 'information_schema' ");
+        if (StringUtils.isNotBlank(schemaName)) {
+            sb.append("AND table_schema = ? ");
+        }
+        if (StringUtils.isNotBlank(tableNameLike)) {
+            sb.append("AND table_name LIKE ? ");
+        }
+        sb.append("ORDER BY table_schema, table_name");
+        return queryIdentities(sb.toString(), schemaName, tableNameLike);
     }
 
     @Override
     public List<DBObjectIdentity> listViews(String schemaName) {
-        throw new UnsupportedOperationException("Not supported yet");
+        StringBuilder sb = new StringBuilder();
+        sb.append("SELECT table_schema AS schema_name, 'VIEW' AS type, table_name AS name ");
+        sb.append("FROM information_schema.tables WHERE table_type = 'VIEW' ");
+        if (StringUtils.isNotBlank(schemaName)) {
+            sb.append("AND table_schema = ? ");
+        } else {
+            sb.append("AND table_schema NOT LIKE 'pg%' AND table_schema <> 'information_schema' ");
+        }
+        sb.append("ORDER BY table_schema, table_name");
+        if (StringUtils.isNotBlank(schemaName)) {
+            return jdbcOperations.query(sb.toString(), IDENTITY_MAPPER, schemaName);
+        }
+        return jdbcOperations.query(sb.toString(), IDENTITY_MAPPER);
     }
 
     @Override
     public List<DBObjectIdentity> listAllViews(String viewNameLike) {
-        throw new UnsupportedOperationException("Not supported yet");
+        StringBuilder sb = new StringBuilder();
+        sb.append("SELECT table_schema AS schema_name, 'VIEW' AS type, table_name AS name ");
+        sb.append("FROM information_schema.tables WHERE table_type = 'VIEW' ");
+        if (StringUtils.isNotBlank(viewNameLike)) {
+            sb.append("AND table_name LIKE ? ");
+        }
+        sb.append("ORDER BY table_schema, table_name");
+        if (StringUtils.isNotBlank(viewNameLike)) {
+            return jdbcOperations.query(sb.toString(), IDENTITY_MAPPER, viewNameLike);
+        }
+        return jdbcOperations.query(sb.toString(), IDENTITY_MAPPER);
     }
 
     @Override
     public List<DBObjectIdentity> listAllUserViews() {
-        throw new UnsupportedOperationException("Not supported yet");
+        String sql = "SELECT table_schema AS schema_name, 'VIEW' AS type, table_name AS name "
+                + "FROM information_schema.tables "
+                + "WHERE table_type = 'VIEW' "
+                + "AND table_schema NOT LIKE 'pg%' AND table_schema <> 'information_schema' "
+                + "ORDER BY table_schema, table_name";
+        return jdbcOperations.query(sql, IDENTITY_MAPPER);
     }
 
     @Override
     public List<DBObjectIdentity> listAllSystemViews() {
-        throw new UnsupportedOperationException("Not supported yet");
+        String sql = "SELECT table_schema AS schema_name, 'VIEW' AS type, table_name AS name "
+                + "FROM information_schema.tables "
+                + "WHERE table_type = 'VIEW' "
+                + "AND (table_schema LIKE 'pg%' OR table_schema = 'information_schema') "
+                + "ORDER BY table_schema, table_name";
+        return jdbcOperations.query(sql, IDENTITY_MAPPER);
+    }
+
+    /**
+     * 合并扫描 user 表与视图（单次 information_schema 扫描），语义与 listTables + listAllUserViews 一致
+     */
+    @Override
+    public List<DBObjectIdentity> listTablesAndViews(String schemaName, String nameLike) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("SELECT table_schema AS schema_name, ");
+        sb.append("CASE WHEN table_type = 'VIEW' THEN 'VIEW' ELSE 'TABLE' END AS type, ");
+        sb.append("table_name AS name ");
+        sb.append("FROM information_schema.tables ");
+        sb.append("WHERE table_type IN ('BASE TABLE', 'VIEW') ");
+        sb.append("AND (table_type = 'VIEW' OR table_name NOT IN (SELECT relname FROM pg_class c ");
+        sb.append("JOIN pg_inherits i ON c.oid = i.inhrelid)) ");
+        sb.append("AND table_schema NOT LIKE 'pg%' AND table_schema <> 'information_schema' ");
+        if (StringUtils.isNotBlank(schemaName)) {
+            sb.append("AND table_schema = ? ");
+        }
+        if (StringUtils.isNotBlank(nameLike)) {
+            sb.append("AND table_name LIKE ? ");
+        }
+        sb.append("ORDER BY table_schema, table_name");
+        return queryIdentities(sb.toString(), schemaName, nameLike);
+    }
+
+    private List<DBObjectIdentity> queryIdentities(String sql, String schemaName, String nameLike) {
+        if (StringUtils.isNotBlank(schemaName) && StringUtils.isNotBlank(nameLike)) {
+            return jdbcOperations.query(sql, IDENTITY_MAPPER, schemaName, nameLike);
+        } else if (StringUtils.isNotBlank(schemaName)) {
+            return jdbcOperations.query(sql, IDENTITY_MAPPER, schemaName);
+        } else if (StringUtils.isNotBlank(nameLike)) {
+            return jdbcOperations.query(sql, IDENTITY_MAPPER, nameLike);
+        }
+        return jdbcOperations.query(sql, IDENTITY_MAPPER);
     }
 
     @Override
