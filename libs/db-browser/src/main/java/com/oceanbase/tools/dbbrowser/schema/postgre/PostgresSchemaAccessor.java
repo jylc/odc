@@ -452,7 +452,8 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
 
     @Override
     public List<DBTableConstraint> listTableConstraints(String schemaName, String tableName) {
-        // GaussDB 兼容：不使用 LATERAL/WITH ORDINALITY（PG 9.3/9.4+），改用 generate_subscripts（8.1+）
+        // GaussDB 兼容：内核不支持 FROM 项函数引用前置表（隐式 LATERAL），
+        // 改用常量序列 JOIN + JOIN ON 内数组下标访问；int2vector 下标从 1 开始
         String sql = "SELECT con.conname AS constraint_name, "
                 + "CASE con.contype WHEN 'p' THEN 'PRIMARY_KEY' WHEN 'u' THEN 'UNIQUE_KEY' "
                 + "WHEN 'f' THEN 'FOREIGN_KEY' WHEN 'c' THEN 'CHECK' ELSE 'UNKNOWN' END AS constraint_type, "
@@ -464,7 +465,8 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
                 + "FROM pg_constraint con "
                 + "JOIN pg_class t ON con.conrelid = t.oid "
                 + "JOIN pg_namespace ns ON t.relnamespace = ns.oid "
-                + "LEFT JOIN generate_subscripts(con.conkey, 1) AS ord ON true "
+                + "JOIN generate_series(1, 255) AS ord "
+                + "ON ord <= array_upper(con.conkey, 1) OR ord <= array_upper(con.confkey, 1) "
                 + "LEFT JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[ord] "
                 + "LEFT JOIN pg_class rtbl ON con.confrelid = rtbl.oid "
                 + "LEFT JOIN pg_namespace rns ON rtbl.relnamespace = rns.oid "
@@ -514,7 +516,9 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
 
     @Override
     public List<DBTableIndex> listTableIndexes(String schemaName, String tableName) {
-        // GaussDB 兼容：不使用 LATERAL/WITH ORDINALITY（PG 9.3/9.4+），改用 generate_subscripts（8.1+）
+        // GaussDB 兼容：内核不支持 FROM 项函数引用前置表（隐式 LATERAL），
+        // 改用常量序列 JOIN + JOIN ON 内数组下标访问。
+        // 注意 pg_index.indkey 是 0 基 int2vector（与 1 基的 pg_constraint.conkey 不同）
         String sql = "SELECT i.relname AS index_name, ix.indisprimary AS is_primary, "
                 + "ix.indisunique AS is_unique, "
                 + "COALESCE(obj_description(i.oid), '') AS index_comment, "
@@ -523,7 +527,8 @@ public class PostgresSchemaAccessor implements DBSchemaAccessor {
                 + "JOIN pg_class t ON ix.indrelid = t.oid "
                 + "JOIN pg_namespace ns ON t.relnamespace = ns.oid "
                 + "JOIN pg_class i ON ix.indexrelid = i.oid "
-                + "LEFT JOIN generate_subscripts(ix.indkey, 1) AS ik_ord ON true "
+                + "JOIN generate_series(0, 255) AS ik_ord "
+                + "ON ik_ord <= array_upper(ix.indkey, 1) "
                 + "LEFT JOIN pg_attribute att ON att.attrelid = t.oid AND att.attnum = ix.indkey[ik_ord] "
                 + "WHERE ns.nspname = ? AND t.relname = ? "
                 + "ORDER BY i.relname, ik_ord";
