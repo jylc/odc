@@ -16,6 +16,8 @@
         value: DORIS
       - label: SUPPORTED_DIALECT_TYPE
         value: ODP_SHARDING_OB_MYSQL
+      - label: SUPPORTED_DIALECT_TYPE
+        value: POSTGRESQL
 - id: 2
   name: ${com.oceanbase.odc.builtin-resource.regulation.rule.sql-console.not-allowed-export-resultset.name}
   description: ${com.oceanbase.odc.builtin-resource.regulation.rule.sql-console.not-allowed-export-resultset.description}
@@ -36,6 +38,8 @@
         value: DORIS
       - label: SUPPORTED_DIALECT_TYPE
         value: ODP_SHARDING_OB_MYSQL
+      - label: SUPPORTED_DIALECT_TYPE
+        value: POSTGRESQL
 - id: 3
   name: ${com.oceanbase.odc.builtin-resource.regulation.rule.sql-console.max-return-rows.name}
   description: ${com.oceanbase.odc.builtin-resource.regulation.rule.sql-console.max-return-rows.description}
@@ -54,6 +58,8 @@
         value: DORIS
       - label: SUPPORTED_DIALECT_TYPE
         value: ODP_SHARDING_OB_MYSQL
+      - label: SUPPORTED_DIALECT_TYPE
+        value: POSTGRESQL
   propertyMetadatas:
       - name: ${com.oceanbase.odc.builtin-resource.regulation.rule.sql-console.max-return-rows.metadata.name}
         description: ${com.oceanbase.odc.builtin-resource.regulation.rule.sql-console.max-return-rows.metadata.description}
@@ -150,6 +156,8 @@
         value: DORIS
       - label: SUPPORTED_DIALECT_TYPE
         value: ODP_SHARDING_OB_MYSQL
+      - label: SUPPORTED_DIALECT_TYPE
+        value: POSTGRESQL
   propertyMetadatas:
       - name: ${com.oceanbase.odc.builtin-resource.regulation.rule.sql-console.max-execute-sqls.metadata.name}
         description: ${com.oceanbase.odc.builtin-resource.regulation.rule.sql-console.max-execute-sqls.metadata.description}
@@ -180,6 +188,8 @@
       - label: SUPPORTED_DIALECT_TYPE
         value: ODP_SHARDING_OB_MYSQL
 
+      - label: SUPPORTED_DIALECT_TYPE
+        value: POSTGRESQL
 - id: 7
   name: ${com.oceanbase.odc.builtin-resource.regulation.rule.sql-check.index-column-calculation.name}
   description: ${com.oceanbase.odc.builtin-resource.regulation.rule.sql-check.index-column-calculation.description}
@@ -1233,6 +1243,8 @@
         value: DORIS
       - label: SUPPORTED_DIALECT_TYPE
         value: ODP_SHARDING_OB_MYSQL
+      - label: SUPPORTED_DIALECT_TYPE
+        value: POSTGRESQL
 - id: 52
   name: ${com.oceanbase.odc.builtin-resource.regulation.rule.sql-console.external-sql-interceptor.name}
   description: ${com.oceanbase.odc.builtin-resource.regulation.rule.sql-console.external-sql-interceptor.description}
@@ -1253,6 +1265,8 @@
         value: DORIS
       - label: SUPPORTED_DIALECT_TYPE
         value: ODP_SHARDING_OB_MYSQL
+      - label: SUPPORTED_DIALECT_TYPE
+        value: POSTGRESQL
   propertyMetadatas:
       - name: ${com.oceanbase.odc.builtin-resource.regulation.rule.sql-console.external-sql-interceptor.metadata.name}
         description: ${com.oceanbase.odc.builtin-resource.regulation.rule.sql-console.external-sql-interceptor.metadata.description}
