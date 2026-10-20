@@ -171,8 +171,40 @@ public class OBMySQLSchemaAccessor extends MySQLNoLessThan5700SchemaAccessor {
     @Override
     public List<DBTableColumn> listTableColumns(String schemaName, String tableName) {
         List<DBTableColumn> columns = super.listTableColumns(schemaName, tableName);
-        setStoredColumnByDDL(schemaName, tableName, columns);
+        if (!setStoredFromExtra(columns)) {
+            setStoredColumnByDDL(schemaName, tableName, columns);
+        }
         return columns;
+    }
+
+    /**
+     * Derive the generated-column {@code stored} flag from information_schema.columns.EXTRA (OB >= 4.0
+     * marks generated columns with 'STORED GENERATED' / 'VIRTUAL GENERATED'), so that the SHOW CREATE
+     * TABLE round-trip plus DDL parsing can be skipped. Non-generated columns default to false,
+     * matching the DDL parser which sets isStored=false when the STORED keyword is absent. A generated
+     * column whose EXTRA carries no GENERATED marker (version quirks) leaves the result inconclusive
+     * and callers should fall back to DDL.
+     *
+     * @return true if EXTRA is conclusive for every column, i.e. no DDL fallback is needed
+     */
+    protected boolean setStoredFromExtra(List<DBTableColumn> columns) {
+        if (CollectionUtils.isEmpty(columns)) {
+            return true;
+        }
+        boolean conclusive = true;
+        for (DBTableColumn column : columns) {
+            String extra = StringUtils.upperCase(column.getExtraInfo());
+            if (StringUtils.contains(extra, "STORED GENERATED")) {
+                column.setStored(true);
+            } else if (StringUtils.contains(extra, "VIRTUAL GENERATED")) {
+                column.setStored(false);
+            } else if (StringUtils.isNotBlank(column.getGenExpression())) {
+                conclusive = false;
+            } else {
+                column.setStored(false);
+            }
+        }
+        return conclusive;
     }
 
     protected void setStoredColumnByDDL(String schemeName, String tableName, List<DBTableColumn> columns) {
@@ -193,11 +225,14 @@ public class OBMySQLSchemaAccessor extends MySQLNoLessThan5700SchemaAccessor {
                 if (CollectionUtils.isEmpty(result.getColumns())) {
                     fillWarning(columns, DBObjectType.COLUMN, "parse DDL failed, may view object");
                 } else {
-                    columns.forEach(column -> result.getColumns().forEach(columnDefinition -> {
-                        if (StringUtils.equals(column.getName(), columnDefinition.getName())) {
-                            column.setStored(columnDefinition.getIsStored());
+                    Map<String, Boolean> columnName2Stored = new HashMap<>(result.getColumns().size());
+                    result.getColumns().forEach(
+                            definition -> columnName2Stored.put(definition.getName(), definition.getIsStored()));
+                    columns.forEach(column -> {
+                        if (columnName2Stored.containsKey(column.getName())) {
+                            column.setStored(columnName2Stored.get(column.getName()));
                         }
-                    }));
+                    });
                 }
             }
         } catch (Exception e) {
