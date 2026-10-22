@@ -239,12 +239,109 @@ public class SqlConsoleInterceptor extends BaseTimeConsumingInterceptor {
             basicResult = new BasicResult(SqlType.UNKNOWN);
             if (e instanceof SyntaxErrorException) {
                 basicResult.setSyntaxError(true);
+                /**
+                 * 方言文法解析失败（如 PG 的双引号标识符 "public"."orders"、特有语法）会使语句 跳过 ALLOW_SQL_TYPES 检查，存在类型白名单被绕过的风险。尝试按首关键字识别
+                 * 常见语句类型，识别成功则正常参与类型管控；识别失败（如 WITH 前缀、PL 块） 才维持跳过策略，避免误伤合法的 PG 特有语法
+                 */
+                SqlType guessed = guessSqlTypeFromLeadingKeyword(sqlTuple.getOriginalSql());
+                if (guessed != null) {
+                    basicResult.setSqlType(guessed);
+                    basicResult.setSyntaxError(false);
+                }
             }
         }
         if (Objects.isNull(basicResult.getSqlType()) || basicResult.getSqlType() == SqlType.UNKNOWN) {
             basicResult.setSqlType(SqlType.OTHERS);
         }
         return basicResult;
+    }
+
+    /**
+     * Fallback type recognition for statements that fail grammar parsing: strip leading
+     * whitespace/comments/parentheses and classify by the first keyword. Returns {@code null} when the
+     * leading keyword cannot determine a {@link SqlType} reliably.
+     */
+    private SqlType guessSqlTypeFromLeadingKeyword(String sql) {
+        if (sql == null) {
+            return null;
+        }
+        int index = 0;
+        int length = sql.length();
+        while (index < length) {
+            char c = sql.charAt(index);
+            if (Character.isWhitespace(c) || c == '(') {
+                index++;
+                continue;
+            }
+            if (c == '-' && index + 1 < length && sql.charAt(index + 1) == '-') {
+                while (index < length && sql.charAt(index) != '\n') {
+                    index++;
+                }
+                continue;
+            }
+            if (c == '#') {
+                while (index < length && sql.charAt(index) != '\n') {
+                    index++;
+                }
+                continue;
+            }
+            if (c == '/' && index + 1 < length && sql.charAt(index + 1) == '*') {
+                index += 2;
+                while (index + 1 < length && !(sql.charAt(index) == '*' && sql.charAt(index + 1) == '/')) {
+                    index++;
+                }
+                index = Math.min(index + 2, length);
+                continue;
+            }
+            break;
+        }
+        int start = index;
+        while (index < length && Character.isLetterOrDigit(sql.charAt(index))) {
+            index++;
+        }
+        if (start == index) {
+            return null;
+        }
+        switch (sql.substring(start, index).toUpperCase()) {
+            case "SELECT":
+                return SqlType.SELECT;
+            case "INSERT":
+                return SqlType.INSERT;
+            case "REPLACE":
+                return SqlType.REPLACE;
+            case "UPDATE":
+                return SqlType.UPDATE;
+            case "DELETE":
+                return SqlType.DELETE;
+            case "CREATE":
+                return SqlType.CREATE;
+            case "DROP":
+                return SqlType.DROP;
+            case "ALTER":
+                return SqlType.ALTER;
+            case "TRUNCATE":
+                return SqlType.TRUNCATE;
+            case "SET":
+                return SqlType.SET;
+            case "SHOW":
+                return SqlType.SHOW;
+            case "EXPLAIN":
+                return SqlType.EXPLAIN;
+            case "DESC":
+            case "DESCRIBE":
+                return SqlType.DESC;
+            case "USE":
+                return SqlType.USE_DB;
+            case "START":
+            case "BEGIN":
+                return SqlType.START_TRANS;
+            case "COMMIT":
+                return SqlType.COMMIT;
+            case "ROLLBACK":
+                return SqlType.ROLLBACK;
+            default:
+                return null;
+        }
     }
 
     @Override
